@@ -193,6 +193,24 @@ python -m pip install -e '.[unitree_g1_ah]'
 
 Also install the Unitree SDK on the PC — see [Unitree G1 Part 1](./unitree_g1#install-the-unitree-sdk).
 
+> **Python 3.12 note.** `unitree_sdk2py` pins `cyclonedds==0.10.2`, which has no 3.12 wheel, and the
+> newer `cyclonedds` 11.x wheel is not API-compatible with the SDK's `Read()`. Build the CycloneDDS
+> 0.10.x C library once and point the binding at it:
+>
+> ```bash
+> git clone -b releases/0.10.x https://github.com/eclipse-cyclonedds/cyclonedds
+> cmake -S cyclonedds -B cyclonedds/build -DCMAKE_INSTALL_PREFIX=$HOME/.local/cyclonedds \
+>   -DBUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF -DENABLE_SSL=OFF -DENABLE_SECURITY=OFF
+> cmake --build cyclonedds/build -j && cmake --install cyclonedds/build
+> export CYCLONEDDS_HOME=$HOME/.local/cyclonedds   # keep this in your shell profile
+> pip install --no-binary cyclonedds "cyclonedds==0.10.2"
+> pip install --no-deps -e /path/to/unitree_sdk2_python
+> ```
+>
+> `CYCLONEDDS_HOME` must be exported in every shell that runs LeRobot; the binding loads `libddsc`
+> from it at import time. With `uv`, re-run the two `pip install` lines after any `uv sync` that is
+> not `--inexact`, since they are not part of the lockfile.
+
 ---
 
 ## Run the Server
