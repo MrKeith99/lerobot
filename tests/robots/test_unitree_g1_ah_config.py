@@ -41,6 +41,9 @@ class TestG1AhConfigDefaults:
         assert HEADHAND_STATE_PORT == 6003
         assert HEADHAND_CMD_PORT == 6002
 
+    def test_sim_env_repo_id_override(self):
+        assert UnitreeG1AhConfig().sim_env_repo_id == "k-valentin/unitree-g1-mujoco"
+
     def test_type(self):
         assert UnitreeG1AhConfig().type == "unitree_g1_23dof_ah8_d455_2dof"
 

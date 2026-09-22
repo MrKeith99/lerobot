@@ -59,6 +59,9 @@ class UnitreeG1Config(RobotConfig):
     # Launch mujoco simulation
     is_simulation: bool = True
 
+    # HF Hub repo id passed to `make_env(..., trust_remote_code=True)` when is_simulation is True
+    sim_env_repo_id: str = "lerobot/unitree-g1-mujoco"
+
     # Socket config for ZMQ bridge
     robot_ip: str = "192.168.123.164"  # default G1 IP
 

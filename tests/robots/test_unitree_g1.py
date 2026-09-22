@@ -121,6 +121,9 @@ class TestUnitreeG1Config:
         cfg1.kp[0] = 999.0
         assert cfg2.kp[0] != 999.0
 
+    def test_default_sim_env_repo_id(self):
+        assert UnitreeG1Config().sim_env_repo_id == "lerobot/unitree-g1-mujoco"
+
 
 # ---------------------------------------------------------------------------
 # Robot mock and integration tests
@@ -265,3 +268,15 @@ def test_disconnect_idempotent(unitree_g1):
     robot, _ = unitree_g1
     # Should not raise even when not connected
     robot.disconnect()
+
+
+def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
+    robot, _ = unitree_g1
+    fake_inner_env = MagicMock()
+    fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
+
+    with patch("lerobot.envs.make_env", return_value=fake_env_wrapper) as mock_make_env:
+        robot.connect()
+        mock_make_env.assert_called_once_with(robot.config.sim_env_repo_id, trust_remote_code=True)
+        assert robot.config.sim_env_repo_id == "lerobot/unitree-g1-mujoco"
+        assert robot.sim_env is fake_inner_env

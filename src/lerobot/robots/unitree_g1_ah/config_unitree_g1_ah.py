@@ -41,6 +41,7 @@ class UnitreeG1AhConfig(UnitreeG1Config):
     revision: str = "rev_1_0"
     check_mode_machine: bool = True
     is_simulation: bool = False
+    sim_env_repo_id: str = "k-valentin/unitree-g1-mujoco"
     headhand_state_port: int = HEADHAND_STATE_PORT
     headhand_cmd_port: int = HEADHAND_CMD_PORT
     headhand_timeout_s: float = 5.0
