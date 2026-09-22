@@ -329,6 +329,47 @@ policy on the 23dof UnitreeG1Ah body — **unverified on UnitreeG1Ah hardware**;
 features drop to the 32-key `ARM_MODE_ACTION_KEYS` set in this mode (arms + head + hands +
 remote axes; the controller owns legs/waist).
 
+## Teleoperate (keyboard)
+
+No gamepad on hand: `unitree_g1_ah_keyboard` emits the same 45-key action space, driven
+from a `pynput` keyboard listener instead of a joystick. It needs an X11 or Wayland
+session with `pynput` installed (`pip install 'lerobot[pynput-dep]'`); on a headless SSH
+session it logs a warning and produces no key input (see `docs/source/unitree_g1_ah.mdx`'s
+gamepad note above for the equivalent hardware-teleop fallback).
+
+```bash
+lerobot-teleoperate \
+  --robot.type=unitree_g1_23dof_ah8_d455_2dof \
+  --robot.robot_ip=192.168.123.164 \
+  --robot.id=lab_g1 \
+  --robot.revision=rev_1_0 \
+  --teleop.type=unitree_g1_ah_keyboard \
+  --robot.cameras='{"head_camera": {"type": "zmq", "server_address": "192.168.123.164", "port": 5555, "camera_name": "head_camera", "width": 640, "height": 480, "fps": 30}}' \
+  --display_data=true
+```
+
+### Controls
+
+| Input            | Action                                                                      |
+| ---------------- | --------------------------------------------------------------------------- |
+| Arrow left/right | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s)                       |
+| Arrow up/down    | Head tilt (invert with `--teleop.invert_tilt=true`)                         |
+| `e`              | Hold to close the right hand (blend rate `hand_blend_per_s`, default 2.0/s) |
+| `q`              | Hold to close the left hand                                                 |
+| `w` / `s`        | `remote.ly` (locomotion command, if a controller is attached)               |
+| `a` / `d`        | `remote.lx`                                                                 |
+| `i` / `k`        | `remote.ry`                                                                 |
+| `j` / `l`        | `remote.rx`                                                                 |
+| `y`              | End episode: success                                                        |
+| `n`              | End episode: failure                                                        |
+| `r`              | End episode: rerecord                                                       |
+| Space            | Hold for intervention (teleop takeover during policy rollout)               |
+| Esc              | Stop the teleoperator                                                       |
+
+The stick-axis keys emit a fixed magnitude (`--teleop.remote_axis_value`, default 0.6)
+while held, instead of a gamepad's continuous analog value. `layout`/`preset` are
+inherited from the gamepad config but unused here — the keyboard mapping is fixed.
+
 ---
 
 ## Record

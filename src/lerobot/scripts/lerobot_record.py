@@ -152,6 +152,7 @@ from lerobot.teleoperators import (  # noqa: F401
     so_leader,
     unitree_g1,
     unitree_g1_ah_gamepad,
+    unitree_g1_ah_keyboard,
 )
 from lerobot.teleoperators.keyboard import KeyboardTeleop
 from lerobot.utils.constants import ACTION, OBS_STR
