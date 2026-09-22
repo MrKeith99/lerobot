@@ -14,9 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""G1Ah robot package: Unitree G1 23dof body + Dynamixel pan/tilt head + AmazingHand hands.
-
-Robot/config exports will be added in P3.
-"""
+"""G1Ah robot package: Unitree G1 23dof body + Dynamixel pan/tilt head + AmazingHand hands."""
 
 from __future__ import annotations
+
+from .config_g1ah import G1AhConfig
+from .g1ah import G1Ah
+
+__all__ = ["G1Ah", "G1AhConfig"]

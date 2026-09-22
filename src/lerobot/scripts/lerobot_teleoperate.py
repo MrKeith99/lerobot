@@ -91,6 +91,7 @@ from lerobot.robots import (  # noqa: F401
     bi_rebot_b601_follower,
     bi_so_follower,
     earthrover_mini_plus,
+    g1ah,
     hope_jr,
     koch_follower,
     make_robot_from_config,
@@ -101,6 +102,7 @@ from lerobot.robots import (  # noqa: F401
     so_follower,
     unitree_g1 as unitree_g1_robot,
 )
+from lerobot.robots.unitree_g1 import UnitreeG1
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
     TeleoperatorConfig,
@@ -194,7 +196,7 @@ def teleop_loop(
         # given that it is the identity processor as default
         obs = robot.get_observation()
 
-        if robot.name == "unitree_g1":
+        if isinstance(robot, UnitreeG1):
             teleop.send_feedback(obs)
 
         # Get teleop action
