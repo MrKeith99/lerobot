@@ -364,28 +364,43 @@ After recording, check `meta/info.json` in the dataset:
 
 The upstream [`lerobot/unitree-g1-mujoco`](https://huggingface.co/lerobot/unitree-g1-mujoco) EnvHub
 repo only ships 29dof bodies. The fork
-[`k-valentin/unitree-g1-mujoco`](https://huggingface.co/k-valentin/unitree-g1-mujoco) adds the
-23dof (rev_1_0) body: 23 actuators mapped onto the 29-slot DDS layout (slots 13, 14, 20, 21, 27,
-28 read zero and ignore commands) and `mode_machine = 4`. Select it with the
-`sim_env_repo_id` field, which `UnitreeG1AhConfig` already defaults to:
+[`k-valentin/unitree-g1-mujoco`](https://huggingface.co/k-valentin/unitree-g1-mujoco) (which
+`UnitreeG1AhConfig.sim_env_repo_id` already points to) adds two things and defaults to both:
+
+- a **23dof (rev_1_0) body**: 23 actuators mapped onto the 29-slot DDS layout (slots 13, 14, 20,
+  21, 27, 28 read zero and ignore commands), `mode_machine = 4`;
+- the **D455 pan/tilt head and both AmazingHands** (`HEAD: d455_pan_tilt`,
+  `END_EFFECTOR: amazing_hand`, 41 actuators): the simulator runs the same head/hand ZMQ bridge
+  (`HeadHandServer`, ports 6002/6003 on localhost) as the Jetson, so `UnitreeG1Ah` connects
+  identically in simulation and on hardware. In simulation the default head/hand calibration is
+  written automatically. The head is modelled with primitives and the wrist→hand mount is a
+  placeholder (`0.16 m`, pending the connector CAD).
 
 ```bash
-# stock 23dof G1 body, no hands (P9a)
+# custom robot: body + head + hands, gamepad teleop (plug the DualShock 4 in first)
 lerobot-teleoperate \
-  --robot.type=unitree_g1 \
-  --robot.is_simulation=true \
+  --robot.type=unitree_g1_23dof_ah8_d455_2dof \
+  --robot.is_simulation=true --robot.id=sim \
+  --teleop.type=unitree_g1_ah_gamepad \
+  --robot.cameras='{"head": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"head_camera","width":640,"height":480,"fps":30,"warmup_s":5}}' \
+  --display_data=true
+
+# stock 23dof body only (no head/hands), GR00T locomotion policy, Unitree joystick teleop
+UNITREE_G1_MUJOCO_END_EFFECTOR=dummy UNITREE_G1_MUJOCO_HEAD=none lerobot-teleoperate \
+  --robot.type=unitree_g1 --robot.is_simulation=true \
   --robot.sim_env_repo_id=k-valentin/unitree-g1-mujoco \
-  --teleop.type=unitree_g1 --teleop.id=sim \
-  --robot.cameras='{"head": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"head_camera","width":640,"height":480,"fps":30,"warmup_s":5}}'
+  --robot.controller=GrootLocomotionController \
+  --teleop.type=unitree_g1 --teleop.id=sim
 ```
 
 The simulator runs in-process and speaks real DDS on `lo`, so the PC needs `unitree_sdk2py`
 and CycloneDDS (see the Python 3.12 note above) plus `pip install mujoco loguru msgpack msgpack-numpy`.
 `make_env` cannot forward options to the hub env; use `UNITREE_G1_MUJOCO_<OPTION>` environment
-variables instead (`UNITREE_G1_MUJOCO_ONSCREEN=0` for headless, `UNITREE_G1_MUJOCO_BODY=29dof`,
-`UNITREE_G1_MUJOCO_END_EFFECTOR=dex1`, …). After `disconnect()` the process may not exit on its
-own because of CycloneDDS finalizers — end it with Ctrl-C. The head + AmazingHand variant of
-the simulation (`END_EFFECTOR: amazing_hand`, `HEAD: d455_pan_tilt`) is the next step (P9b).
+variables instead (`ONSCREEN=0` for headless, `BODY=29dof`, `END_EFFECTOR=dex1|dex3|dummy|amazing_hand`,
+`HEAD=none|d455_pan_tilt`, `JOYSTICK_TYPE=dualshock4|xbox|switch`, `HEADHAND_STATE_PORT`,
+`HEADHAND_CMD_PORT`). In the MuJoCo viewer, `9` releases the elastic band holding the robot,
+`7`/`8` change the waist height. After `disconnect()` the process may not exit on its own because of
+CycloneDDS finalizers — end it with Ctrl-C.
 
 ---
 
