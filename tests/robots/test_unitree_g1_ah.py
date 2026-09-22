@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the G1Ah robot. Meant to be run in an environment where the Unitree SDK is installed."""
+"""Tests for the UnitreeG1Ah robot. Meant to be run in an environment where the Unitree SDK is installed."""
 
 import contextlib
 from unittest.mock import MagicMock, patch
@@ -26,14 +26,14 @@ from lerobot.utils.import_utils import _unitree_sdk_available
 if not _unitree_sdk_available:
     pytest.skip("Unitree SDK not available", allow_module_level=True)
 
-from lerobot.robots.g1ah.config_g1ah import G1AhConfig
-from lerobot.robots.g1ah.g1ah_devices import default_calibration
-from lerobot.robots.g1ah.g1ah_joints import (
+from lerobot.robots.unitree_g1_ah.config_unitree_g1_ah import UnitreeG1AhConfig
+from lerobot.robots.unitree_g1_ah.g1_ah_devices import default_calibration
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ARM_MODE_ACTION_KEYS,
     G1_23_BODY_JOINTS,
     HEAD_HAND_MOTORS,
 )
-from tests.mocks.mock_g1ah_server import MockHeadHandServer
+from tests.mocks.mock_unitree_g1_ah_server import MockHeadHandServer
 
 
 def _make_lowstate_msg_mock(mode_machine: int = 4):
@@ -122,10 +122,10 @@ def headhand_server():
 
 
 def _new_robot(headhand_server, mocks, tmp_path, *, config_kwargs=None, controller=None):
-    from lerobot.robots.g1ah.g1ah import G1Ah
+    from lerobot.robots.unitree_g1_ah.unitree_g1_ah import UnitreeG1Ah
 
     kwargs = dict(config_kwargs or {})
-    cfg = G1AhConfig(
+    cfg = UnitreeG1AhConfig(
         robot_ip="127.0.0.1",
         headhand_state_port=headhand_server.state_port,
         headhand_cmd_port=headhand_server.cmd_port,
@@ -133,7 +133,7 @@ def _new_robot(headhand_server, mocks, tmp_path, *, config_kwargs=None, controll
         id="test",
         **kwargs,
     )
-    robot = G1Ah(cfg)
+    robot = UnitreeG1Ah(cfg)
     robot.calibration = {name: default_calibration(name) for name in HEAD_HAND_MOTORS}
     robot._save_calibration()
     return robot
@@ -160,8 +160,8 @@ class TestG1AhIdentity:
             for p in patches:
                 stack.enter_context(p)
             robot = _new_robot(headhand_server, mocks, tmp_path, config_kwargs={"revision": "rev_1_0"})
-            assert robot.name == "g1_23dof_ah8_d455_2dof_rev_1_0"
-            assert robot.robot_type == "g1_23dof_ah8_d455_2dof_rev_1_0"
+            assert robot.name == "unitree_g1_23dof_ah8_d455_2dof_rev_1_0"
+            assert robot.robot_type == "unitree_g1_23dof_ah8_d455_2dof_rev_1_0"
             assert str(tmp_path) in str(robot.calibration_dir) or robot.calibration_dir == tmp_path
 
     def test_name_and_calibration_dir_base(self, headhand_server, tmp_path):
@@ -171,7 +171,7 @@ class TestG1AhIdentity:
             for p in patches:
                 stack.enter_context(p)
             robot = _new_robot(headhand_server, mocks, tmp_path, config_kwargs={"revision": "base"})
-            assert robot.name == "g1_23dof_ah8_d455_2dof"
+            assert robot.name == "unitree_g1_23dof_ah8_d455_2dof"
 
 
 class TestG1AhFeatures:
@@ -246,7 +246,7 @@ class TestG1AhConnect:
 
         assert found is not None
         calib = robot.calibration["xl330_joint"]
-        from lerobot.robots.g1ah.g1ah_devices import rad_to_ticks
+        from lerobot.robots.unitree_g1_ah.g1_ah_devices import rad_to_ticks
 
         expected = rad_to_ticks("xl330-m288", 0.7, calib)
         assert found == expected
@@ -277,9 +277,9 @@ class TestG1AhHeadhandTimeout:
         with contextlib.ExitStack() as stack:
             for p in patches:
                 stack.enter_context(p)
-            from lerobot.robots.g1ah.g1ah import G1Ah
+            from lerobot.robots.unitree_g1_ah.unitree_g1_ah import UnitreeG1Ah
 
-            cfg = G1AhConfig(
+            cfg = UnitreeG1AhConfig(
                 robot_ip="127.0.0.1",
                 headhand_state_port=1,
                 headhand_cmd_port=2,
@@ -287,7 +287,7 @@ class TestG1AhHeadhandTimeout:
                 calibration_dir=tmp_path,
                 id="test",
             )
-            robot = G1Ah(cfg)
+            robot = UnitreeG1Ah(cfg)
             robot.calibration = {name: default_calibration(name) for name in HEAD_HAND_MOTORS}
             robot._save_calibration()
             with pytest.raises(TimeoutError):

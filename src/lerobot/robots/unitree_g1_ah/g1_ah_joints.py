@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Single source of truth for the G1Ah joint/motor layout.
+"""Single source of truth for the UnitreeG1Ah joint/motor layout.
 
 Covers the Unitree G1 23dof body (a 29dof SDK with 6 unused slots on this hardware
 revision), the 2-DoF Dynamixel pan/tilt head, and the two 8-servo AmazingHand hands.
@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, G1_29_JointArmIndex, G1_29_JointIndex
 
-ROBOT_TYPE_BASE = "g1_23dof_ah8_d455_2dof"
+ROBOT_TYPE_BASE = "unitree_g1_23dof_ah8_d455_2dof"
 ROBOT_TYPE_REV_1_0 = ROBOT_TYPE_BASE + "_rev_1_0"
 REVISIONS: tuple[str, ...] = ("base", "rev_1_0")
 ROBOT_TYPE_BY_REVISION: dict[str, str] = {"base": ROBOT_TYPE_BASE, "rev_1_0": ROBOT_TYPE_REV_1_0}

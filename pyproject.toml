@@ -187,7 +187,7 @@ unitree_g1 = [
     "lerobot[matplotlib-dep]",
     "lerobot[pygame-dep]",
 ]
-g1ah = [
+unitree_g1_ah = [
     "lerobot[unitree_g1]",
     "lerobot[dynamixel]",
     "lerobot[feetech]",
@@ -343,7 +343,7 @@ all = [
     "lerobot[topreward]",
     "lerobot[peft]",
     # "lerobot[unitree_g1]", TODO: Unitree requires specific installation instructions for unitree_sdk2
-    # "lerobot[g1ah]", depends on lerobot[unitree_g1]
+    # "lerobot[unitree_g1_ah]", depends on lerobot[unitree_g1]
 ]
 
 [project.scripts]

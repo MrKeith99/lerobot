@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""In-process fake G1Ah head/hand server for ZMQ client tests. No hardware/SDK required."""
+"""In-process fake UnitreeG1Ah head/hand server for ZMQ client tests. No hardware/SDK required."""
 
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ import time
 
 import zmq
 
-from lerobot.robots.g1ah.g1ah_devices import default_calibration
-from lerobot.robots.g1ah.g1ah_joints import HEAD_HAND_MOTORS
-from lerobot.robots.g1ah.g1ah_zmq import decode_cmd, encode_state
+from lerobot.robots.unitree_g1_ah.g1_ah_devices import default_calibration
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import HEAD_HAND_MOTORS
+from lerobot.robots.unitree_g1_ah.g1_ah_zmq import decode_cmd, encode_state
 
 
 class MockHeadHandServer:

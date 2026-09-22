@@ -1,8 +1,8 @@
-# Unitree G1 + AmazingHand (G1Ah)
+# Unitree G1 + AmazingHand
 
-G1Ah pairs the Unitree G1's 23dof body with a Dynamixel XL330 pan/tilt head carrying an
+UnitreeG1Ah pairs the Unitree G1's 23dof body with a Dynamixel XL330 pan/tilt head carrying an
 Intel RealSense D455, and two 8-servo AmazingHand end-effectors. The robot type string is
-`g1_23dof_ah8_d455_2dof`, with a `revision` field (`base` or `rev_1_0`) selecting the
+`unitree_g1_23dof_ah8_d455_2dof`, with a `revision` field (`base` or `rev_1_0`) selecting the
 hardware generation. It builds on [Unitree G1](./unitree_g1) — read that guide first for the
 DDS/network basics.
 
@@ -10,46 +10,46 @@ DDS/network basics.
 
 ## Hardware & Joint Layout
 
-G1Ah exposes 41 action/observation keys in a fixed order: 23 body joints (Unitree G1 SDK
+UnitreeG1Ah exposes 41 action/observation keys in a fixed order: 23 body joints (Unitree G1 SDK
 order, with 6 unused SDK slots dropped), 2 head joints, then 8 left-hand and 8 right-hand
 servos.
 
 ### Body (23, SDK order)
 
-| # | SDK slot | Lerobot key |
-|---|----------|-------------|
-| 0 | 0 | `kLeftHipPitch.q` |
-| 1 | 1 | `kLeftHipRoll.q` |
-| 2 | 2 | `kLeftHipYaw.q` |
-| 3 | 3 | `kLeftKnee.q` |
-| 4 | 4 | `kLeftAnklePitch.q` |
-| 5 | 5 | `kLeftAnkleRoll.q` |
-| 6 | 6 | `kRightHipPitch.q` |
-| 7 | 7 | `kRightHipRoll.q` |
-| 8 | 8 | `kRightHipYaw.q` |
-| 9 | 9 | `kRightKnee.q` |
-| 10 | 10 | `kRightAnklePitch.q` |
-| 11 | 11 | `kRightAnkleRoll.q` |
-| 12 | 12 | `kWaistYaw.q` |
-| 13 | 15 | `kLeftShoulderPitch.q` |
-| 14 | 16 | `kLeftShoulderRoll.q` |
-| 15 | 17 | `kLeftShoulderYaw.q` |
-| 16 | 18 | `kLeftElbow.q` |
-| 17 | 19 | `kLeftWristRoll.q` |
-| 18 | 22 | `kRightShoulderPitch.q` |
-| 19 | 23 | `kRightShoulderRoll.q` |
-| 20 | 24 | `kRightShoulderYaw.q` |
-| 21 | 25 | `kRightElbow.q` |
-| 22 | 26 | `kRightWristRoll.q` |
+| #   | SDK slot | Lerobot key             |
+| --- | -------- | ----------------------- |
+| 0   | 0        | `kLeftHipPitch.q`       |
+| 1   | 1        | `kLeftHipRoll.q`        |
+| 2   | 2        | `kLeftHipYaw.q`         |
+| 3   | 3        | `kLeftKnee.q`           |
+| 4   | 4        | `kLeftAnklePitch.q`     |
+| 5   | 5        | `kLeftAnkleRoll.q`      |
+| 6   | 6        | `kRightHipPitch.q`      |
+| 7   | 7        | `kRightHipRoll.q`       |
+| 8   | 8        | `kRightHipYaw.q`        |
+| 9   | 9        | `kRightKnee.q`          |
+| 10  | 10       | `kRightAnklePitch.q`    |
+| 11  | 11       | `kRightAnkleRoll.q`     |
+| 12  | 12       | `kWaistYaw.q`           |
+| 13  | 15       | `kLeftShoulderPitch.q`  |
+| 14  | 16       | `kLeftShoulderRoll.q`   |
+| 15  | 17       | `kLeftShoulderYaw.q`    |
+| 16  | 18       | `kLeftElbow.q`          |
+| 17  | 19       | `kLeftWristRoll.q`      |
+| 18  | 22       | `kRightShoulderPitch.q` |
+| 19  | 23       | `kRightShoulderRoll.q`  |
+| 20  | 24       | `kRightShoulderYaw.q`   |
+| 21  | 25       | `kRightElbow.q`         |
+| 22  | 26       | `kRightWristRoll.q`     |
 
-(Generated from `g1ah_joints.BODY_KEYS` / `G1_23_BODY_JOINTS`.)
+(Generated from `g1_ah_joints.BODY_KEYS` / `G1_23_BODY_JOINTS`.)
 
 ### Head (2)
 
-| Lerobot key | Motor | Model |
-|-------------|-------|-------|
-| `xl330_joint.q` | pan | xl330-m288 |
-| `d455_joint.q` | tilt (carries the D455) | xl330-m288 |
+| Lerobot key     | Motor                   | Model      |
+| --------------- | ----------------------- | ---------- |
+| `xl330_joint.q` | pan                     | xl330-m288 |
+| `d455_joint.q`  | tilt (carries the D455) | xl330-m288 |
 
 ### Left hand (8)
 
@@ -65,15 +65,15 @@ motor IDs 11–18.
 
 The 23dof body is a 29dof Unitree SDK message with 6 slots that don't exist on this
 hardware — waist roll/pitch (slots 13, 14) and the two wrist pitch/yaw pairs (slots 20, 21,
-27, 28). `G1_23_INVALID_SDK_SLOTS = (13, 14, 20, 21, 27, 28)` in `g1ah_joints.py` is the
-single source of truth; `G1Ah.publish_lowcmd` zeroes `kp`/`kd` on those slots so the SDK
+27, 28). `G1_23_INVALID_SDK_SLOTS = (13, 14, 20, 21, 27, 28)` in `g1_ah_joints.py` is the
+single source of truth; `UnitreeG1Ah.publish_lowcmd` zeroes `kp`/`kd` on those slots so the SDK
 never applies torque to a joint that isn't physically present.
 
 ### `revision` / `mode_machine`
 
 `revision` (`"base"` or `"rev_1_0"`) selects both the robot type suffix
 (`ROBOT_TYPE_BY_REVISION`) and the expected DDS `mode_machine` value
-(`MODE_MACHINE_BY_REVISION`: `base` → 1, `rev_1_0` → 4). On `connect()`, `G1Ah` reads the
+(`MODE_MACHINE_BY_REVISION`: `base` → 1, `rev_1_0` → 4). On `connect()`, `UnitreeG1Ah` reads the
 live `mode_machine` off the first low-state message and raises `ValueError` (after
 disconnecting) if it doesn't match the configured `revision` — this catches plugging into
 the wrong G1 hardware generation before any motion command is sent. Set
@@ -87,7 +87,7 @@ the wrong G1 hardware generation before any motion command is sent. Set
 ┌─────────────────────────┐         ┌──────────────────────────┐
 │   Jetson (on robot)     │         │        PC (client)        │
 │                          │         │                            │
-│  run_g1ah_server.py      │         │        G1Ah (robot)       │
+│  run_g1_ah_server.py      │         │        UnitreeG1Ah (robot)       │
 │  ┌────────────────────┐  │  DDS    │                            │
 │  │ Unitree DDS <-> ZMQ │◄─┼────────►│  UnitreeG1 body bus        │
 │  │  body bridge         │  │ ZMQ 6000/6001 (lowcmd/lowstate)     │
@@ -102,13 +102,14 @@ the wrong G1 hardware generation before any motion command is sent. Set
 └─────────────────────────┘         └──────────────────────────┘
 ```
 
-The Jetson attached to the robot runs `run_g1ah_server.py`, which launches:
+The Jetson attached to the robot runs `run_g1_ah_server.py`, which launches:
+
 - the body DDS↔ZMQ bridge (ports 6000/6001, reused unmodified from `unitree_g1.run_g1_server`)
 - the head/hand ZMQ bridge (`HeadHandServer`, default ports 6002/6003) talking to the
   Dynamixel head bus and Feetech hand bus via `HeadHandDevice`
 - an optional camera `ImageServer` (default port 5555) streaming the D455
 
-The PC runs the `G1Ah` robot class, which subclasses `UnitreeG1` for the body and adds a
+The PC runs the `UnitreeG1Ah` robot class, which subclasses `UnitreeG1` for the body and adds a
 `HeadHandZmqClient` for the head/hands.
 
 ---
@@ -119,16 +120,16 @@ The PC runs the `G1Ah` robot class, which subclasses `UnitreeG1` for the body an
 
 Follow [Unitree G1 Part 1](./unitree_g1#install-the-unitree-sdk) — same SDK, same steps.
 
-### 2. Install LeRobot with the `g1ah` extra
+### 2. Install LeRobot with the `unitree_g1_ah` extra
 
 ```bash
 git clone https://github.com/huggingface/lerobot.git
 cd lerobot
 conda install -c conda-forge "pinocchio>=3.0.0,<4.0.0"
-python -m pip install -e '.[g1ah]'
+python -m pip install -e '.[unitree_g1_ah]'
 ```
 
-`g1ah` pulls in `unitree_g1` (SDK-adjacent deps), `dynamixel` (head bus), `feetech` (hand
+`unitree_g1_ah` pulls in `unitree_g1` (SDK-adjacent deps), `dynamixel` (head bus), `feetech` (hand
 bus), `gamepad`, and `intelrealsense`.
 
 ### 3. udev rules for the head/hand serial ports
@@ -155,7 +156,7 @@ then verify with `python -c "import pyrealsense2"`.
 ### 5. Scan the head/hand bus
 
 ```bash
-python -m lerobot.robots.g1ah.g1ah_devices scan
+python -m lerobot.robots.unitree_g1_ah.g1_ah_devices scan
 ```
 
 Expected output — head motor IDs 1 and 2 report model `1200` (XL330-M288), hand motor IDs
@@ -176,7 +177,7 @@ from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
 print(RealSenseCamera.find_cameras())
 ```
 
-Note the `serial_number` for the D455 — you'll pass it to `run_g1ah_server.py` and to
+Note the `serial_number` for the D455 — you'll pass it to `run_g1_ah_server.py` and to
 `--robot.cameras`.
 
 ---
@@ -187,7 +188,7 @@ Note the `serial_number` for the D455 — you'll pass it to `run_g1ah_server.py`
 git clone https://github.com/huggingface/lerobot.git
 cd lerobot
 conda install -c conda-forge "pinocchio>=3.0.0,<4.0.0"
-python -m pip install -e '.[g1ah]'
+python -m pip install -e '.[unitree_g1_ah]'
 ```
 
 Also install the Unitree SDK on the PC — see [Unitree G1 Part 1](./unitree_g1#install-the-unitree-sdk).
@@ -199,7 +200,7 @@ Also install the Unitree SDK on the PC — see [Unitree G1 Part 1](./unitree_g1#
 On the Jetson:
 
 ```bash
-python src/lerobot/robots/g1ah/run_g1ah_server.py \
+python src/lerobot/robots/unitree_g1_ah/run_g1_ah_server.py \
   --camera --camera-type intelrealsense --camera-serial <D455_SERIAL>
 ```
 
@@ -208,6 +209,7 @@ message — cross-check this against the `--robot.revision` you plan to use on t
 (`base` → 1, `rev_1_0` → 4).
 
 Useful flags:
+
 - `--no-headhand` — disable the head/hand bridge (body-only, e.g. for locomotion-only testing)
 - `--no-handshake` — skip the head/hand bus connect handshake (workaround for firmware that
   doesn't respond to the handshake ping; see Troubleshooting)
@@ -217,7 +219,7 @@ Useful flags:
 
 ## Safety
 
-- `run_g1ah_server.py` calls `MotionSwitcherClient.ReleaseMode()` on startup, which
+- `run_g1_ah_server.py` calls `MotionSwitcherClient.ReleaseMode()` on startup, which
   disables Unitree's built-in balance controller. **There is no fall-catching once
   released** — the robot will not recover balance on its own.
 - With `controller=None` (the default), the legs hold their connect-time pose stiffly
@@ -226,9 +228,9 @@ Useful flags:
   a pose (only takes effect when no locomotion controller is attached).
 - **Use a gantry or overhead support** whenever the robot is powered and connected, unless
   you are specifically testing a locomotion controller in a cleared area.
-- `G1Ah.disconnect()` zero-torques the body joints (inherited from `UnitreeG1`), but the
+- `UnitreeG1Ah.disconnect()` zero-torques the body joints (inherited from `UnitreeG1`), but the
   **hands keep torque enabled** after disconnect — the head/hand bridge is a separate
-  subsystem. Run `python -m lerobot.robots.g1ah.g1ah_devices torque-off` on the Jetson (or
+  subsystem. Run `python -m lerobot.robots.unitree_g1_ah.g1_ah_devices torque-off` on the Jetson (or
   power-cycle) to fully de-energize the hands.
 
 ---
@@ -237,13 +239,14 @@ Useful flags:
 
 ```bash
 lerobot-calibrate \
-  --robot.type=g1_23dof_ah8_d455_2dof \
+  --robot.type=unitree_g1_23dof_ah8_d455_2dof \
   --robot.robot_ip=192.168.123.164 \
   --robot.id=lab_g1 \
   --robot.revision=rev_1_0
 ```
 
 The interactive flow:
+
 1. **Center the head** (camera forward, level) — press Enter to record the zero tick.
 2. **Turn the head to the robot's LEFT and tilt UP slightly** — press Enter; this sample
    determines pan/tilt sign (`drive_mode`) from the direction of tick change.
@@ -255,7 +258,7 @@ The interactive flow:
 
 The resulting calibration is written to
 `~/.cache/huggingface/lerobot/calibration/robots/<robot_type>/<id>.json` (e.g.
-`.../g1_23dof_ah8_d455_2dof_rev_1_0/lab_g1.json`).
+`.../unitree_g1_23dof_ah8_d455_2dof_rev_1_0/lab_g1.json`).
 
 ---
 
@@ -263,39 +266,39 @@ The resulting calibration is written to
 
 ```bash
 lerobot-teleoperate \
-  --robot.type=g1_23dof_ah8_d455_2dof \
+  --robot.type=unitree_g1_23dof_ah8_d455_2dof \
   --robot.robot_ip=192.168.123.164 \
   --robot.id=lab_g1 \
   --robot.revision=rev_1_0 \
-  --teleop.type=g1ah_gamepad \
+  --teleop.type=unitree_g1_ah_gamepad \
   --robot.cameras='{"head_camera": {"type": "zmq", "server_address": "192.168.123.164", "port": 5555, "camera_name": "head_camera", "width": 640, "height": 480, "fps": 30}}' \
   --display_data=true
 ```
 
-### Controls (`GamepadLayout` / `G1AhGamepadTeleopConfig` defaults, Xbox-style pad)
+### Controls (`GamepadLayout` / `UnitreeG1AhGamepadTeleopConfig` defaults, Xbox-style pad)
 
-| Input | Action |
-|-------|--------|
-| D-pad left/right | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s) |
-| D-pad up/down | Head tilt (invert with `--teleop.invert_tilt=true`) |
-| RB (button 5) | Hold to close the right hand (blend rate `hand_blend_per_s`, default 2.0/s) |
-| LB (button 4) | Hold to close the left hand |
-| Left stick | `remote.lx` / `remote.ly` (locomotion command, if a controller is attached) |
-| Right stick | `remote.rx` / `remote.ry` |
-| Y | End episode: success |
-| A | End episode: failure |
-| X | End episode: rerecord |
-| Start (button 7) | Hold for intervention (teleop takeover during policy rollout) |
+| Input            | Action                                                                      |
+| ---------------- | --------------------------------------------------------------------------- |
+| D-pad left/right | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s)                       |
+| D-pad up/down    | Head tilt (invert with `--teleop.invert_tilt=true`)                         |
+| RB (button 5)    | Hold to close the right hand (blend rate `hand_blend_per_s`, default 2.0/s) |
+| LB (button 4)    | Hold to close the left hand                                                 |
+| Left stick       | `remote.lx` / `remote.ly` (locomotion command, if a controller is attached) |
+| Right stick      | `remote.rx` / `remote.ry`                                                   |
+| Y                | End episode: success                                                        |
+| A                | End episode: failure                                                        |
+| X                | End episode: rerecord                                                       |
+| Start (button 7) | Hold for intervention (teleop takeover during policy rollout)               |
 
 On a non-Xbox pad, the button/axis indices may differ under SDL2. Override them with
 `--teleop.layout.button_rb=<idx>`, `--teleop.layout.left_x=<idx>`, etc. — see
-`GamepadLayout` in `config_g1ah_gamepad.py` for the full field list.
+`GamepadLayout` in `config_unitree_g1_ah_gamepad.py` for the full field list.
 
 ### Optional: locomotion controller
 
 Pass `--robot.controller=HolosomaLocomotionController` to drive the legs with a learned
 locomotion policy while the gamepad controls arms/head/hands. This runs a 29dof-trained
-policy on the 23dof G1Ah body — **unverified on G1Ah hardware**; use a gantry. Action
+policy on the 23dof UnitreeG1Ah body — **unverified on UnitreeG1Ah hardware**; use a gantry. Action
 features drop to the 32-key `ARM_MODE_ACTION_KEYS` set in this mode (arms + head + hands +
 remote axes; the controller owns legs/waist).
 
@@ -305,12 +308,12 @@ remote axes; the controller owns legs/waist).
 
 ```bash
 lerobot-record \
-  --robot.type=g1_23dof_ah8_d455_2dof \
+  --robot.type=unitree_g1_23dof_ah8_d455_2dof \
   --robot.robot_ip=192.168.123.164 \
   --robot.id=lab_g1 \
   --robot.revision=rev_1_0 \
   --robot.cameras='{"head_camera": {"type": "zmq", "server_address": "192.168.123.164", "port": 5555, "camera_name": "head_camera", "width": 640, "height": 480, "fps": 30}}' \
-  --teleop.type=g1ah_gamepad \
+  --teleop.type=unitree_g1_ah_gamepad \
   --dataset.repo_id=MrKeith99/g1ah_test \
   --dataset.single_task="Test" \
   --dataset.num_episodes=2 \
@@ -320,20 +323,21 @@ lerobot-record \
 ```
 
 After recording, check `meta/info.json` in the dataset:
-- `"robot_type"` should read `"g1_23dof_ah8_d455_2dof_rev_1_0"` (or the `base` variant).
+
+- `"robot_type"` should read `"unitree_g1_23dof_ah8_d455_2dof_rev_1_0"` (or the `base` variant).
 - `features["action"]["shape"]` should be `[41]` (or `[32]` with a locomotion controller
   attached), and likewise for `features["observation.state"]["shape"]`.
 - `features["action"]["names"]` (and `observation.state`) should list all 41 keys in
   body → head → left hand → right hand order, matching `ALL_ACTION_KEYS` in
-  `g1ah_joints.py`.
+  `g1_ah_joints.py`.
 
 ---
 
 ## Train / Inference
 
 Training and inference commands are identical to [Unitree G1 Part 4](./unitree_g1#part-4-training--inference) —
-swap `--robot.type=unitree_g1` for `--robot.type=g1_23dof_ah8_d455_2dof` (plus
-`--robot.revision=...`) and point `--policy.repo_id` / `--dataset.repo_id` at your G1Ah
+swap `--robot.type=unitree_g1` for `--robot.type=unitree_g1_23dof_ah8_d455_2dof` (plus
+`--robot.revision=...`) and point `--policy.repo_id` / `--dataset.repo_id` at your UnitreeG1Ah
 dataset and policy.
 
 ---
@@ -351,11 +355,11 @@ yet implemented here.
 ## Troubleshooting
 
 **`mode_machine=<n> does not match revision ...`** — the DDS `mode_machine` reported by the
-robot doesn't match `--robot.revision`. Check `run_g1ah_server.py`'s startup log line
+robot doesn't match `--robot.revision`. Check `run_g1_ah_server.py`'s startup log line
 (`mode_machine=<n>`) and pass the matching `--robot.revision=base` (1) or `rev_1_0` (4). To
 bypass entirely, set `--robot.check_mode_machine=false`.
 
-**Head/hand connect times out (`TimeoutError`)** — `G1Ah.connect()` waits up to
+**Head/hand connect times out (`TimeoutError`)** — `UnitreeG1Ah.connect()` waits up to
 `headhand_timeout_s` (default 5s) for the first head/hand state message. Check: the bridge
 server is running and printed `Head/hand bridge started (...)`; `--robot.headhand_state_port`
 / `--robot.headhand_cmd_port` match the server's `--headhand-state-port` /
@@ -375,5 +379,5 @@ this error surface elsewhere means something is calling `sync_read` directly on
 
 **Firmware mismatch on connect handshake** — if the head or hand bus fails to connect with
 a handshake-related error, some Dynamixel/Feetech firmware revisions don't answer the
-handshake ping as expected. Retry with `--no-handshake` on `run_g1ah_server.py` (or
-`g1ah_devices --no-handshake` for the CLI utility) to skip it.
+handshake ping as expected. Retry with `--no-handshake` on `run_g1_ah_server.py` (or
+`g1_ah_devices --no-handshake` for the CLI utility) to skip it.

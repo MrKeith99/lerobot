@@ -23,7 +23,7 @@ from lerobot.utils.import_utils import _pygame_available
 
 from ..gamepad.gamepad_utils import GamepadController
 from ..utils import TeleopEvents
-from .config_g1ah_gamepad import GamepadLayout
+from .config_unitree_g1_ah_gamepad import GamepadLayout
 
 if TYPE_CHECKING or _pygame_available:
     import pygame
@@ -31,8 +31,8 @@ else:
     pygame = None  # type: ignore[assignment]
 
 
-class G1AhGamepadInput(GamepadController):
-    """Gamepad input reader for G1Ah teleop: raw axes/buttons/hat plus episode events.
+class UnitreeG1AhGamepadInput(GamepadController):
+    """Gamepad input reader for UnitreeG1Ah teleop: raw axes/buttons/hat plus episode events.
 
     Button indices come from `GamepadLayout` instead of the hardcoded ones in
     `GamepadController.update()`. `intervention_flag` (read back through the inherited

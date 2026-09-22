@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Config for the G1Ah robot: Unitree G1 23dof body + Dynamixel head + AmazingHand hands."""
+"""Config for the UnitreeG1Ah robot: Unitree G1 23dof body + Dynamixel head + AmazingHand hands."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from lerobot.robots.unitree_g1.config_unitree_g1 import UnitreeG1Config
 
 from ..config import RobotConfig
-from .g1ah_joints import (
+from .g1_ah_joints import (
     DEFAULT_HAND_Q,
     DEFAULT_HEAD_Q,
     G1_23_INVALID_SDK_SLOTS,
@@ -32,12 +32,12 @@ from .g1ah_joints import (
     ROBOT_TYPE_BASE,
     ROBOT_TYPE_BY_REVISION,
 )
-from .g1ah_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT
+from .g1_ah_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT
 
 
 @RobotConfig.register_subclass(ROBOT_TYPE_BASE)
 @dataclass
-class G1AhConfig(UnitreeG1Config):
+class UnitreeG1AhConfig(UnitreeG1Config):
     revision: str = "rev_1_0"
     check_mode_machine: bool = True
     is_simulation: bool = False

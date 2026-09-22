@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DDS-to-ZMQ bridge server for the G1Ah robot: G1 body (via `run_g1_server`) plus the
+"""DDS-to-ZMQ bridge server for the UnitreeG1Ah robot: G1 body (via `run_g1_server`) plus the
 Dynamixel head and Feetech hands bridged over their own ZMQ ports.
 
 Only runs on the Jetson attached to the robot; `unitree_sdk2py` is a hard runtime
@@ -33,8 +33,6 @@ from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_ as hg_LowCmd, LowStat
 from unitree_sdk2py.utils.crc import CRC
 
 from lerobot.cameras.zmq.image_server import ImageServer
-from lerobot.robots.g1ah.g1ah_devices import DEFAULT_HAND_PORT, DEFAULT_HEAD_PORT, HeadHandDevice
-from lerobot.robots.g1ah.g1ah_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT, HeadHandServer
 from lerobot.robots.unitree_g1.run_g1_server import (
     LOWCMD_PORT,
     LOWSTATE_PORT,
@@ -43,6 +41,8 @@ from lerobot.robots.unitree_g1.run_g1_server import (
     kTopicLowState,
     state_forward_loop,
 )
+from lerobot.robots.unitree_g1_ah.g1_ah_devices import DEFAULT_HAND_PORT, DEFAULT_HEAD_PORT, HeadHandDevice
+from lerobot.robots.unitree_g1_ah.g1_ah_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT, HeadHandServer
 
 
 def build_camera_config(args: argparse.Namespace) -> dict:
@@ -63,7 +63,7 @@ def build_camera_config(args: argparse.Namespace) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="DDS-to-ZMQ bridge server for G1Ah")
+    parser = argparse.ArgumentParser(description="DDS-to-ZMQ bridge server for UnitreeG1Ah")
     parser.add_argument("--camera", action="store_true", help="Also launch camera server")
     parser.add_argument("--camera-type", choices=["opencv", "intelrealsense"], default="intelrealsense")
     parser.add_argument("--camera-serial", default=None, help="RealSense serial number or name")

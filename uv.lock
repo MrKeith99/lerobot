@@ -3009,22 +3009,6 @@ feetech = [
     { name = "feetech-servo-sdk" },
     { name = "pyserial" },
 ]
-g1ah = [
-    { name = "contourpy" },
-    { name = "deepdiff" },
-    { name = "dynamixel-sdk" },
-    { name = "feetech-servo-sdk" },
-    { name = "hidapi" },
-    { name = "matplotlib" },
-    { name = "meshcat" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "pygame" },
-    { name = "pyrealsense2", marker = "sys_platform != 'darwin'" },
-    { name = "pyrealsense2-macosx", marker = "sys_platform == 'darwin'" },
-    { name = "pyserial" },
-    { name = "pyzmq" },
-]
 gamepad = [
     { name = "hidapi" },
     { name = "pygame" },
@@ -3256,6 +3240,22 @@ unitree-g1 = [
     { name = "pyserial" },
     { name = "pyzmq" },
 ]
+unitree-g1-ah = [
+    { name = "contourpy" },
+    { name = "deepdiff" },
+    { name = "dynamixel-sdk" },
+    { name = "feetech-servo-sdk" },
+    { name = "hidapi" },
+    { name = "matplotlib" },
+    { name = "meshcat" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "pygame" },
+    { name = "pyrealsense2", marker = "sys_platform != 'darwin'" },
+    { name = "pyrealsense2-macosx", marker = "sys_platform == 'darwin'" },
+    { name = "pyserial" },
+    { name = "pyzmq" },
+]
 video-benchmark = [
     { name = "pandas" },
     { name = "scikit-image" },
@@ -3349,15 +3349,15 @@ requires-dist = [
     { name = "lerobot", extras = ["diffusers-dep"], marker = "extra == 'vla-jepa'" },
     { name = "lerobot", extras = ["diffusion"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["dynamixel"], marker = "extra == 'all'" },
-    { name = "lerobot", extras = ["dynamixel"], marker = "extra == 'g1ah'" },
+    { name = "lerobot", extras = ["dynamixel"], marker = "extra == 'unitree-g1-ah'" },
     { name = "lerobot", extras = ["evo1"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["fastwam"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["feetech"], marker = "extra == 'all'" },
-    { name = "lerobot", extras = ["feetech"], marker = "extra == 'g1ah'" },
     { name = "lerobot", extras = ["feetech"], marker = "extra == 'hopejr'" },
     { name = "lerobot", extras = ["feetech"], marker = "extra == 'lekiwi'" },
+    { name = "lerobot", extras = ["feetech"], marker = "extra == 'unitree-g1-ah'" },
     { name = "lerobot", extras = ["gamepad"], marker = "extra == 'all'" },
-    { name = "lerobot", extras = ["gamepad"], marker = "extra == 'g1ah'" },
+    { name = "lerobot", extras = ["gamepad"], marker = "extra == 'unitree-g1-ah'" },
     { name = "lerobot", extras = ["groot"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["grpcio-dep"], marker = "extra == 'async'" },
     { name = "lerobot", extras = ["grpcio-dep"], marker = "extra == 'dev'" },
@@ -3367,7 +3367,7 @@ requires-dist = [
     { name = "lerobot", extras = ["hilserl"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["hopejr"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["intelrealsense"], marker = "extra == 'all'" },
-    { name = "lerobot", extras = ["intelrealsense"], marker = "extra == 'g1ah'" },
+    { name = "lerobot", extras = ["intelrealsense"], marker = "extra == 'unitree-g1-ah'" },
     { name = "lerobot", extras = ["kinematics"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["lekiwi"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["libero"], marker = "sys_platform == 'linux' and extra == 'all'" },
@@ -3444,7 +3444,7 @@ requires-dist = [
     { name = "lerobot", extras = ["transformers-dep"], marker = "extra == 'vla-jepa'" },
     { name = "lerobot", extras = ["transformers-dep"], marker = "extra == 'wallx'" },
     { name = "lerobot", extras = ["transformers-dep"], marker = "extra == 'xvla'" },
-    { name = "lerobot", extras = ["unitree-g1"], marker = "extra == 'g1ah'" },
+    { name = "lerobot", extras = ["unitree-g1"], marker = "extra == 'unitree-g1-ah'" },
     { name = "lerobot", extras = ["video-benchmark"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["viz"], marker = "extra == 'all'" },
     { name = "lerobot", extras = ["viz"], marker = "extra == 'core-scripts'" },
@@ -3512,7 +3512,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'transformers-dep'", specifier = ">=5.4.0,<5.6.0" },
     { name = "wandb", marker = "extra == 'training'", specifier = ">=0.24.0,<0.28.0" },
 ]
-provides-extras = ["dataset", "training", "hardware", "viz", "core-scripts", "evaluation", "dataset-viz", "av-dep", "pygame-dep", "placo-dep", "transformers-dep", "grpcio-dep", "accelerate-dep", "can-dep", "peft-dep", "scipy-dep", "diffusers-dep", "qwen-vl-utils-dep", "matplotlib-dep", "pyserial-dep", "deepdiff-dep", "pynput-dep", "pyzmq-dep", "motorbridge-dep", "motorbridge-smart-servo-dep", "timm-dep", "feetech", "dynamixel", "damiao", "robstride", "openarms", "gamepad", "hopejr", "lekiwi", "unitree-g1", "g1ah", "reachy2", "rebot", "kinematics", "intelrealsense", "phone", "diffusion", "wallx", "pi", "molmoact2", "smolvla", "multi-task-dit", "groot", "sarm", "robometer", "topreward", "xvla", "eo1", "fastwam", "evo1", "hilserl", "vla-jepa", "lingbot-va", "async", "peft", "annotations", "dev", "notebook", "test", "video-benchmark", "aloha", "pusht", "libero", "metaworld", "all"]
+provides-extras = ["dataset", "training", "hardware", "viz", "core-scripts", "evaluation", "dataset-viz", "av-dep", "pygame-dep", "placo-dep", "transformers-dep", "grpcio-dep", "accelerate-dep", "can-dep", "peft-dep", "scipy-dep", "diffusers-dep", "qwen-vl-utils-dep", "matplotlib-dep", "pyserial-dep", "deepdiff-dep", "pynput-dep", "pyzmq-dep", "motorbridge-dep", "motorbridge-smart-servo-dep", "timm-dep", "feetech", "dynamixel", "damiao", "robstride", "openarms", "gamepad", "hopejr", "lekiwi", "unitree-g1", "unitree-g1-ah", "reachy2", "rebot", "kinematics", "intelrealsense", "phone", "diffusion", "wallx", "pi", "molmoact2", "smolvla", "multi-task-dit", "groot", "sarm", "robometer", "topreward", "xvla", "eo1", "fastwam", "evo1", "hilserl", "vla-jepa", "lingbot-va", "async", "peft", "annotations", "dev", "notebook", "test", "video-benchmark", "aloha", "pusht", "libero", "metaworld", "all"]
 
 [[package]]
 name = "librt"

@@ -14,11 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""G1Ah robot package: Unitree G1 23dof body + Dynamixel pan/tilt head + AmazingHand hands."""
+"""UnitreeG1Ah robot package: Unitree G1 23dof body + Dynamixel pan/tilt head + AmazingHand hands."""
 
 from __future__ import annotations
 
-from .config_g1ah import G1AhConfig
-from .g1ah import G1Ah
+from .config_unitree_g1_ah import UnitreeG1AhConfig
+from .unitree_g1_ah import UnitreeG1Ah
 
-__all__ = ["G1Ah", "G1AhConfig"]
+__all__ = ["UnitreeG1Ah", "UnitreeG1AhConfig"]

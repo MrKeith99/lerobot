@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""G1Ah robot: `UnitreeG1` body plus a ZMQ-bridged Dynamixel head and AmazingHand hands."""
+"""UnitreeG1Ah robot: `UnitreeG1` body plus a ZMQ-bridged Dynamixel head and AmazingHand hands."""
 
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ from lerobot.lerobot_types import RobotAction, RobotObservation
 from lerobot.motors.motors_bus import MotorCalibration
 from lerobot.robots.unitree_g1.unitree_g1 import UnitreeG1
 
-from .config_g1ah import G1AhConfig
-from .g1ah_devices import (
+from .config_unitree_g1_ah import UnitreeG1AhConfig
+from .g1_ah_devices import (
     TICK_RANGE,
     TICKS_PER_RAD,
     clamp_rad,
@@ -40,7 +40,7 @@ from .g1ah_devices import (
     rad_to_ticks,
     ticks_to_rad,
 )
-from .g1ah_joints import (
+from .g1_ah_joints import (
     ALL_ACTION_KEYS,
     ARM_MODE_ACTION_KEYS,
     G1_23_INVALID_SDK_SLOTS,
@@ -56,7 +56,7 @@ from .g1ah_joints import (
     hand_motor_names,
     key_to_motor_name,
 )
-from .g1ah_zmq import HeadHandZmqClient
+from .g1_ah_zmq import HeadHandZmqClient
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +68,11 @@ def _clamp_to_model_range(model: str, value: int) -> int:
     return max(tick_min, min(value, tick_max))
 
 
-class G1Ah(UnitreeG1):
-    config_class = G1AhConfig
+class UnitreeG1Ah(UnitreeG1):
+    config_class = UnitreeG1AhConfig
     name = ROBOT_TYPE_BASE
 
-    def __init__(self, config: G1AhConfig):
+    def __init__(self, config: UnitreeG1AhConfig):
         self.name = config.robot_type_name
         super().__init__(config)
         self.headhand = HeadHandZmqClient(
@@ -253,7 +253,7 @@ class G1Ah(UnitreeG1):
         return calibration
 
     def calibrate(self) -> None:
-        print(f"\nCalibrating G1Ah head/hand motors for {self}")
+        print(f"\nCalibrating UnitreeG1Ah head/hand motors for {self}")
         self.headhand.send(torque=False)
 
         input("Center the head (camera forward, level), then press Enter")

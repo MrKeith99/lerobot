@@ -14,11 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the G1Ah joint/motor layout tables. No hardware required."""
+"""Tests for the UnitreeG1Ah joint/motor layout tables. No hardware required."""
 
 import pytest
 
-from lerobot.robots.g1ah import g1ah_joints as j
+from lerobot.robots.unitree_g1_ah import g1_ah_joints as j
 
 
 def test_key_counts():
@@ -173,7 +173,7 @@ def test_default_action_keys_and_zero_body():
 
 
 def test_robot_type_and_mode_machine_by_revision():
-    assert j.ROBOT_TYPE_BY_REVISION["rev_1_0"] == "g1_23dof_ah8_d455_2dof_rev_1_0"
-    assert j.ROBOT_TYPE_BY_REVISION["base"] == "g1_23dof_ah8_d455_2dof"
+    assert j.ROBOT_TYPE_BY_REVISION["rev_1_0"] == "unitree_g1_23dof_ah8_d455_2dof_rev_1_0"
+    assert j.ROBOT_TYPE_BY_REVISION["base"] == "unitree_g1_23dof_ah8_d455_2dof"
     assert j.MODE_MACHINE_BY_REVISION["base"] == 1
     assert j.MODE_MACHINE_BY_REVISION["rev_1_0"] == 4

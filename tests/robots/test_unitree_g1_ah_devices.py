@@ -14,14 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `g1ah_devices`: tick/rad conversion and `HeadHandDevice` bus wiring. No hardware."""
+"""Tests for `g1_ah_devices`: tick/rad conversion and `HeadHandDevice` bus wiring. No hardware."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from lerobot.robots.g1ah import g1ah_devices as d
-from lerobot.robots.g1ah.g1ah_joints import HAND_MOTORS, HEAD_LIMITS_RAD, HEAD_MOTORS
+from lerobot.robots.unitree_g1_ah import g1_ah_devices as d
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import HAND_MOTORS, HEAD_LIMITS_RAD, HEAD_MOTORS
 
 
 def _bus_factory(motors_seen: dict) -> MagicMock:

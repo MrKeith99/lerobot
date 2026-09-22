@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Head (Dynamixel) + hands (Feetech) motor bus wrapper for the G1Ah robot.
+"""Head (Dynamixel) + hands (Feetech) motor bus wrapper for the UnitreeG1Ah robot.
 
 Ticks are always read/written raw (`normalize=False`); conversion to/from radians is
 done here instead of relying on `MotorsBus` normalization, since the SCS0009 servo span
@@ -31,7 +31,7 @@ from collections.abc import Mapping
 
 from lerobot.motors.motors_bus import Motor, MotorCalibration, MotorNormMode
 
-from .g1ah_joints import HAND_LIMIT_RAD, HAND_MOTORS, HEAD_LIMITS_RAD, HEAD_MOTORS
+from .g1_ah_joints import HAND_LIMIT_RAD, HAND_MOTORS, HEAD_LIMITS_RAD, HEAD_MOTORS
 
 TICKS_PER_RAD: dict[str, float] = {
     "xl330-m288": 4096 / (2 * math.pi),
@@ -105,7 +105,7 @@ def build_hand_motors() -> dict[str, Motor]:
 
 
 class HeadHandDevice:
-    """Owns the Dynamixel head bus and the Feetech hand bus for the G1Ah robot."""
+    """Owns the Dynamixel head bus and the Feetech hand bus for the UnitreeG1Ah robot."""
 
     def __init__(
         self,
@@ -207,7 +207,7 @@ class HeadHandDevice:
 
 
 def _cli() -> None:
-    parser = argparse.ArgumentParser(description="G1Ah head/hand device utility")
+    parser = argparse.ArgumentParser(description="UnitreeG1Ah head/hand device utility")
     parser.add_argument("command", choices=["scan", "read", "torque-off"])
     parser.add_argument("--head-port", default=DEFAULT_HEAD_PORT)
     parser.add_argument("--hand-port", default=DEFAULT_HAND_PORT)

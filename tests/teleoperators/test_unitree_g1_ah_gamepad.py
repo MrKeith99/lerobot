@@ -20,13 +20,16 @@ from unittest.mock import patch
 
 import pytest
 
-from lerobot.robots.g1ah.g1ah_joints import TELEOP_ACTION_KEYS, default_action, hand_pose_rad
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES
-from lerobot.teleoperators.g1ah_gamepad import G1AhGamepadTeleop, G1AhGamepadTeleopConfig
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import TELEOP_ACTION_KEYS, default_action, hand_pose_rad
+from lerobot.teleoperators.unitree_g1_ah_gamepad import (
+    UnitreeG1AhGamepadTeleop,
+    UnitreeG1AhGamepadTeleopConfig,
+)
 from lerobot.teleoperators.utils import TeleopEvents, make_teleoperator_from_config
 from lerobot.utils.errors import DeviceNotConnectedError
 
-_MODULE = "lerobot.teleoperators.g1ah_gamepad.g1ah_gamepad"
+_MODULE = "lerobot.teleoperators.unitree_g1_ah_gamepad.unitree_g1_ah_gamepad"
 
 
 class FakeInput:
@@ -75,8 +78,8 @@ class FakeInput:
 
 @pytest.fixture
 def teleop():
-    with patch(f"{_MODULE}.G1AhGamepadInput", FakeInput):
-        t = G1AhGamepadTeleop(G1AhGamepadTeleopConfig())
+    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        t = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig())
         t.connect()
         yield t
         if t.is_connected:
@@ -218,8 +221,8 @@ def test_remote_axes_passthrough_with_sign_convention(teleop):
 
 
 def test_emit_remote_axes_false_zeros_out():
-    with patch(f"{_MODULE}.G1AhGamepadInput", FakeInput):
-        t = G1AhGamepadTeleop(G1AhGamepadTeleopConfig(emit_remote_axes=False))
+    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        t = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig(emit_remote_axes=False))
         t.connect()
         t.gamepad.axes[t.config.layout.left_x] = 0.9
         action = t.get_action()
@@ -230,9 +233,9 @@ def test_emit_remote_axes_false_zeros_out():
 
 
 def test_initial_positions_override_applied():
-    cfg = G1AhGamepadTeleopConfig(initial_positions={"xl330_joint.q": 0.3})
-    with patch(f"{_MODULE}.G1AhGamepadInput", FakeInput):
-        t = G1AhGamepadTeleop(cfg)
+    cfg = UnitreeG1AhGamepadTeleopConfig(initial_positions={"xl330_joint.q": 0.3})
+    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        t = UnitreeG1AhGamepadTeleop(cfg)
         t.connect()
         action = t.get_action()
         assert action["xl330_joint.q"] == pytest.approx(0.3)
@@ -240,9 +243,9 @@ def test_initial_positions_override_applied():
 
 
 def test_initial_positions_invalid_key_raises():
-    cfg = G1AhGamepadTeleopConfig(initial_positions={"not_a_real_key.q": 0.0})
+    cfg = UnitreeG1AhGamepadTeleopConfig(initial_positions={"not_a_real_key.q": 0.0})
     with pytest.raises(ValueError):
-        G1AhGamepadTeleop(cfg)
+        UnitreeG1AhGamepadTeleop(cfg)
 
 
 def test_get_teleop_events_maps_success_failure_rerecord(teleop):
@@ -264,8 +267,8 @@ def test_get_teleop_events_maps_success_failure_rerecord(teleop):
 
 
 def test_make_teleoperator_from_config_returns_class_without_connecting():
-    teleop = make_teleoperator_from_config(G1AhGamepadTeleopConfig())
-    assert isinstance(teleop, G1AhGamepadTeleop)
+    teleop = make_teleoperator_from_config(UnitreeG1AhGamepadTeleopConfig())
+    assert isinstance(teleop, UnitreeG1AhGamepadTeleop)
     assert not teleop.is_connected
 
 
@@ -276,6 +279,6 @@ def test_disconnect_idempotent(teleop):
 
 
 def test_get_action_before_connect_raises():
-    teleop = G1AhGamepadTeleop(G1AhGamepadTeleopConfig())
+    teleop = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig())
     with pytest.raises(DeviceNotConnectedError):
         teleop.get_action()

@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ZMQ transport for the G1Ah head/hand bridge, mirroring `unitree_g1`'s lowcmd/lowstate pattern.
+"""ZMQ transport for the UnitreeG1Ah head/hand bridge, mirroring `unitree_g1`'s lowcmd/lowstate pattern.
 
 Ports and topics are separate from the body's `LOWCMD_PORT`/`LOWSTATE_PORT` so the head/hand
 bridge can run alongside the DDS-to-ZMQ body bridge in the same server process.
@@ -36,12 +36,12 @@ if TYPE_CHECKING or _zmq_available:
 else:
     zmq = None  # type: ignore[assignment]
 
-from .g1ah_devices import HeadHandDevice
+from .g1_ah_devices import HeadHandDevice
 
 HEADHAND_CMD_PORT = 6002
 HEADHAND_STATE_PORT = 6003
-HEADHAND_STATE_TOPIC = "g1ah/headhand_state"
-HEADHAND_CMD_TOPIC = "g1ah/headhand_cmd"
+HEADHAND_STATE_TOPIC = "unitree_g1_ah/headhand_state"
+HEADHAND_CMD_TOPIC = "unitree_g1_ah/headhand_cmd"
 
 
 def encode_state(ticks: Mapping[str, int], torque: bool, error: str | None = None) -> bytes:

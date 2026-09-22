@@ -59,7 +59,6 @@ from lerobot.robots import (  # noqa: F401
     bi_rebot_b601_follower,
     bi_so_follower,
     earthrover_mini_plus,
-    g1ah,
     hope_jr,
     koch_follower,
     lekiwi,
@@ -70,6 +69,7 @@ from lerobot.robots import (  # noqa: F401
     rebot_b601_follower,
     so_follower,
     unitree_g1,
+    unitree_g1_ah,
 )
 from lerobot.utils.constants import ACTION
 from lerobot.utils.import_utils import register_third_party_plugins

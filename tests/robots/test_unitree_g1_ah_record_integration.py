@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""End-to-end record-loop contract test for G1Ah: get_observation -> teleop get_action ->
+"""End-to-end record-loop contract test for UnitreeG1Ah: get_observation -> teleop get_action ->
 send_action -> build_dataset_frame, with no hardware and no real Unitree SDK.
 """
 
@@ -30,15 +30,18 @@ from lerobot.utils.import_utils import _unitree_sdk_available
 if not _unitree_sdk_available:
     pytest.skip("Unitree SDK not available", allow_module_level=True)
 
-from lerobot.robots.g1ah.g1ah_joints import ALL_ACTION_KEYS, ARM_MODE_ACTION_KEYS, HEAD_HAND_MOTORS
-from lerobot.teleoperators.g1ah_gamepad import G1AhGamepadTeleop, G1AhGamepadTeleopConfig
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import ALL_ACTION_KEYS, ARM_MODE_ACTION_KEYS, HEAD_HAND_MOTORS
+from lerobot.teleoperators.unitree_g1_ah_gamepad import (
+    UnitreeG1AhGamepadTeleop,
+    UnitreeG1AhGamepadTeleopConfig,
+)
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts, hw_to_dataset_features
-from tests.mocks.mock_g1ah_server import MockHeadHandServer
-from tests.robots.test_g1ah import _make_g1ah, _make_sdk_mocks, _make_stub_controller, _new_robot
-from tests.teleoperators.test_g1ah_gamepad import FakeInput
+from tests.mocks.mock_unitree_g1_ah_server import MockHeadHandServer
+from tests.robots.test_unitree_g1_ah import _make_g1ah, _make_sdk_mocks, _make_stub_controller, _new_robot
+from tests.teleoperators.test_unitree_g1_ah_gamepad import FakeInput
 
-_GAMEPAD_MODULE = "lerobot.teleoperators.g1ah_gamepad.g1ah_gamepad"
+_GAMEPAD_MODULE = "lerobot.teleoperators.unitree_g1_ah_gamepad.unitree_g1_ah_gamepad"
 
 
 @pytest.fixture
@@ -49,8 +52,8 @@ def headhand_server():
 
 @pytest.fixture
 def teleop():
-    with patch(f"{_GAMEPAD_MODULE}.G1AhGamepadInput", FakeInput):
-        t = G1AhGamepadTeleop(G1AhGamepadTeleopConfig())
+    with patch(f"{_GAMEPAD_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        t = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig())
         t.connect()
         yield t
         if t.is_connected:

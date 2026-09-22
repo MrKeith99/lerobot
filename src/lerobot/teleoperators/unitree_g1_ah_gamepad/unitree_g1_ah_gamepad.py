@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hardware-light gamepad teleoperator for the G1Ah robot.
+"""Hardware-light gamepad teleoperator for the UnitreeG1Ah robot.
 
 Emits every key in `TELEOP_ACTION_KEYS` on every `get_action()` call: held body/hand
 poses, D-pad-driven head targets, an RB/LB-blended hand open/close, and the 4
@@ -29,7 +29,8 @@ from functools import cached_property
 from typing import Any
 
 from lerobot.lerobot_types import RobotAction
-from lerobot.robots.g1ah.g1ah_joints import (
+from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
     HEAD_LIMITS_RAD,
     TELEOP_ACTION_KEYS,
@@ -37,13 +38,12 @@ from lerobot.robots.g1ah.g1ah_joints import (
     hand_motor_names,
     hand_pose_rad,
 )
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES
 from lerobot.utils.decorators import check_if_not_connected
 
 from ..teleoperator import Teleoperator
 from ..utils import TeleopEvents
-from .config_g1ah_gamepad import G1AhGamepadTeleopConfig
-from .gamepad_input import G1AhGamepadInput
+from .config_unitree_g1_ah_gamepad import UnitreeG1AhGamepadTeleopConfig
+from .gamepad_input import UnitreeG1AhGamepadInput
 
 _DT_CAP_S = 0.1
 
@@ -52,16 +52,16 @@ def _lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
 
 
-class G1AhGamepadTeleop(Teleoperator):
-    """Gamepad teleoperator emitting the full G1Ah teleop action space (45 keys)."""
+class UnitreeG1AhGamepadTeleop(Teleoperator):
+    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (45 keys)."""
 
-    config_class = G1AhGamepadTeleopConfig
-    name = "g1ah_gamepad"
+    config_class = UnitreeG1AhGamepadTeleopConfig
+    name = "unitree_g1_ah_gamepad"
 
-    def __init__(self, config: G1AhGamepadTeleopConfig):
+    def __init__(self, config: UnitreeG1AhGamepadTeleopConfig):
         super().__init__(config)
         self.config = config
-        self.gamepad: G1AhGamepadInput | None = None
+        self.gamepad: UnitreeG1AhGamepadInput | None = None
 
         self._target: dict[str, float] = default_action()
         if config.initial_positions is not None:
@@ -84,10 +84,10 @@ class G1AhGamepadTeleop(Teleoperator):
         return {}
 
     def connect(self, calibrate: bool = True) -> None:
-        self.gamepad = G1AhGamepadInput(self.config.layout, self.config.deadzone)
+        self.gamepad = UnitreeG1AhGamepadInput(self.config.layout, self.config.deadzone)
         self.gamepad.start()
         self._last_t = None
-        print("G1Ah gamepad controls:")
+        print("UnitreeG1Ah gamepad controls:")
         print("  D-pad: head pan (left/right) / tilt (up/down)")
         print("  RB / LB: hold to close right / left hand")
         print("  Sticks: locomotion command (remote.lx/ly/rx/ry)")

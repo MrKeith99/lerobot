@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `g1ah_zmq`: client/server wire format and round trip over real sockets on localhost."""
+"""Tests for `g1_ah_zmq`: client/server wire format and round trip over real sockets on localhost."""
 
 import threading
 import time
@@ -24,10 +24,10 @@ import pytest
 
 pytest.importorskip("zmq")
 
-from lerobot.robots.g1ah import g1ah_zmq as gz
-from lerobot.robots.g1ah.g1ah_devices import HeadHandDevice
-from lerobot.robots.g1ah.g1ah_joints import HEAD_HAND_MOTORS, HEAD_MOTORS
-from tests.mocks.mock_g1ah_server import MockHeadHandServer
+from lerobot.robots.unitree_g1_ah import g1_ah_zmq as gz
+from lerobot.robots.unitree_g1_ah.g1_ah_devices import HeadHandDevice
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import HEAD_HAND_MOTORS, HEAD_MOTORS
+from tests.mocks.mock_unitree_g1_ah_server import MockHeadHandServer
 
 
 def _wait_until(predicate, timeout_s: float = 3.0, interval_s: float = 0.01) -> bool:

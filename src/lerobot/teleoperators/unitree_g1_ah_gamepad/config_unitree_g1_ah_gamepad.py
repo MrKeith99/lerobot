@@ -40,10 +40,10 @@ class GamepadLayout:
     hat: int = 0
 
 
-@TeleoperatorConfig.register_subclass("g1ah_gamepad")
+@TeleoperatorConfig.register_subclass("unitree_g1_ah_gamepad")
 @dataclass
-class G1AhGamepadTeleopConfig(TeleoperatorConfig):
-    """Hardware-light gamepad teleoperator for the G1Ah robot.
+class UnitreeG1AhGamepadTeleopConfig(TeleoperatorConfig):
+    """Hardware-light gamepad teleoperator for the UnitreeG1Ah robot.
 
     Emits every key in `TELEOP_ACTION_KEYS`: held body/hand poses, D-pad-driven
     head targets, an RB/LB-blended hand open/close, and the 4 `REMOTE_AXES`
