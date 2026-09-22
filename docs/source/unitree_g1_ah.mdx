@@ -293,24 +293,33 @@ lerobot-teleoperate \
   --display_data=true
 ```
 
-### Controls (`GamepadLayout` / `UnitreeG1AhGamepadTeleopConfig` defaults, Xbox-style pad)
+### Controls (default preset `dualshock4_hidapi`)
 
-| Input            | Action                                                                      |
-| ---------------- | --------------------------------------------------------------------------- |
-| D-pad left/right | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s)                       |
-| D-pad up/down    | Head tilt (invert with `--teleop.invert_tilt=true`)                         |
-| RB (button 5)    | Hold to close the right hand (blend rate `hand_blend_per_s`, default 2.0/s) |
-| LB (button 4)    | Hold to close the left hand                                                 |
-| Left stick       | `remote.lx` / `remote.ly` (locomotion command, if a controller is attached) |
-| Right stick      | `remote.rx` / `remote.ry`                                                   |
-| Y                | End episode: success                                                        |
-| A                | End episode: failure                                                        |
-| X                | End episode: rerecord                                                       |
-| Start (button 7) | Hold for intervention (teleop takeover during policy rollout)               |
+| Input                    | Action                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| D-pad left/right         | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s)                       |
+| D-pad up/down            | Head tilt (invert with `--teleop.invert_tilt=true`)                         |
+| R1 (RB on Xbox)          | Hold to close the right hand (blend rate `hand_blend_per_s`, default 2.0/s) |
+| L1 (LB on Xbox)          | Hold to close the left hand                                                 |
+| Left stick               | `remote.lx` / `remote.ly` (locomotion command, if a controller is attached) |
+| Right stick              | `remote.rx` / `remote.ry`                                                   |
+| Triangle (Y on Xbox)     | End episode: success                                                        |
+| Cross (A on Xbox)        | End episode: failure                                                        |
+| Square (X on Xbox)       | End episode: rerecord                                                       |
+| Options (Start on Xbox)  | Hold for intervention (teleop takeover during policy rollout)               |
 
-On a non-Xbox pad, the button/axis indices may differ under SDL2. Override them with
-`--teleop.layout.button_rb=<idx>`, `--teleop.layout.left_x=<idx>`, etc. — see
-`GamepadLayout` in `config_unitree_g1_ah_gamepad.py` for the full field list.
+Two DualShock 4 layouts exist because SDL2 can talk to the pad either through its
+HIDAPI PS4 driver (default on SDL2 >= 2.0.14, no hat — D-pad reported as buttons) or
+through the kernel `hid-sony` joystick path (D-pad reported as a hat); which one is
+active is out of this teleop's control, so both are provided as presets. Switch pad
+layout with `--teleop.preset=xbox|dualshock4_kernel|dualshock4_hidapi`, or override
+individual indices with `--teleop.layout.button_rb=<idx>`, `--teleop.layout.left_x=<idx>`,
+etc. — see `GamepadLayout` in `config_unitree_g1_ah_gamepad.py` for the full field list.
+If the indices printed above don't match your pad, discover the real ones with:
+
+```bash
+python -m lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input --seconds 30
+```
 
 ### Optional: locomotion controller
 

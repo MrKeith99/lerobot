@@ -87,11 +87,15 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         self.gamepad = UnitreeG1AhGamepadInput(self.config.layout, self.config.deadzone)
         self.gamepad.start()
         self._last_t = None
-        print("UnitreeG1Ah gamepad controls:")
+        if self.config.preset == "xbox":
+            rb_lb, yax = "RB / LB", "Y / A / X"
+        else:
+            rb_lb, yax = "R1 / L1", "Triangle / Cross / Square"
+        print(f"UnitreeG1Ah gamepad controls ({self.config.preset}):")
         print("  D-pad: head pan (left/right) / tilt (up/down)")
-        print("  RB / LB: hold to close right / left hand")
+        print(f"  {rb_lb}: hold to close right / left hand")
         print("  Sticks: locomotion command (remote.lx/ly/rx/ry)")
-        print("  Y / A / X: end episode success / failure / rerecord")
+        print(f"  {yax}: end episode success / failure / rerecord")
 
     @property
     def is_connected(self) -> bool:

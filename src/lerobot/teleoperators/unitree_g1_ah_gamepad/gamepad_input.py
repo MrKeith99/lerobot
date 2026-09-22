@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from lerobot.utils.import_utils import _pygame_available
@@ -88,9 +90,12 @@ class UnitreeG1AhGamepadInput(GamepadController):
     def hat(self) -> tuple[int, int]:
         if self.joystick is None:
             return (0, 0)
+        layout = self.layout
+        if layout.dpad_up is not None:
+            return _dpad_from_buttons(self, layout)
         try:
-            if self.joystick.get_numhats() > 0:
-                return self.joystick.get_hat(self.layout.hat)
+            if layout.hat is not None and self.joystick.get_numhats() > 0:
+                return self.joystick.get_hat(layout.hat)
             return (0, 0)
         except pygame.error:
             return (0, 0)
@@ -98,3 +103,66 @@ class UnitreeG1AhGamepadInput(GamepadController):
     @property
     def is_running(self) -> bool:
         return self.running
+
+
+def _dpad_from_buttons(gamepad: UnitreeG1AhGamepadInput, layout: GamepadLayout) -> tuple[int, int]:
+    right = int(gamepad.button(layout.dpad_right))
+    left = int(gamepad.button(layout.dpad_left))
+    up = int(gamepad.button(layout.dpad_up))
+    down = int(gamepad.button(layout.dpad_down))
+    return (right - left, up - down)
+
+
+def probe(seconds: float = 20.0) -> None:
+    """Print live axis/button/hat activity for the first connected gamepad.
+
+    Use this to discover a pad's index layout for a `GamepadLayout` preset:
+    `python -m lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input --seconds 30`.
+    """
+    if not _pygame_available:
+        print("pygame is not installed. Install it with: pip install 'lerobot[gamepad]'")
+        return
+
+    pygame.init()
+    pygame.joystick.init()
+    if pygame.joystick.get_count() == 0:
+        print("No gamepad detected. Please connect a gamepad and try again.")
+        pygame.quit()
+        return
+
+    joystick = pygame.joystick.Joystick(0)
+    joystick.init()
+    print(f"Joystick: {joystick.get_name()}")
+    print(f"axes={joystick.get_numaxes()} buttons={joystick.get_numbuttons()} hats={joystick.get_numhats()}")
+    print("Move sticks/triggers and press buttons/D-pad to see their indices. Ctrl+C to stop early.")
+
+    last_hats = [joystick.get_hat(i) for i in range(joystick.get_numhats())]
+    start = time.monotonic()
+    try:
+        while time.monotonic() - start < seconds:
+            for event in pygame.event.get():
+                if event.type == pygame.JOYBUTTONDOWN:
+                    print(f"button {event.button} down")
+            for axis in range(joystick.get_numaxes()):
+                value = joystick.get_axis(axis)
+                if abs(value) > 0.5:
+                    print(f"axis {axis} = {value:.2f}")
+            for hat_index in range(joystick.get_numhats()):
+                value = joystick.get_hat(hat_index)
+                if value != last_hats[hat_index]:
+                    print(f"hat {hat_index} = {value}")
+                    last_hats[hat_index] = value
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        joystick.quit()
+        pygame.joystick.quit()
+        pygame.quit()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Probe a connected gamepad's axis/button/hat indices.")
+    parser.add_argument("--seconds", type=float, default=20.0, help="How long to poll for (default: 20).")
+    args = parser.parse_args()
+    probe(args.seconds)

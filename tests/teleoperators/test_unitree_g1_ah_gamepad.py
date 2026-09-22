@@ -26,8 +26,11 @@ from lerobot.teleoperators.unitree_g1_ah_gamepad import (
     UnitreeG1AhGamepadTeleop,
     UnitreeG1AhGamepadTeleopConfig,
 )
+from lerobot.teleoperators.unitree_g1_ah_gamepad.config_unitree_g1_ah_gamepad import GamepadLayout
+from lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input import _dpad_from_buttons
 from lerobot.teleoperators.utils import TeleopEvents, make_teleoperator_from_config
 from lerobot.utils.errors import DeviceNotConnectedError
+from tests.utils import skip_if_package_missing
 
 _MODULE = "lerobot.teleoperators.unitree_g1_ah_gamepad.unitree_g1_ah_gamepad"
 
@@ -61,6 +64,8 @@ class FakeInput:
         return index in self.buttons
 
     def hat(self) -> tuple[int, int]:
+        if self.layout.dpad_up is not None:
+            return _dpad_from_buttons(self, self.layout)
         return self.hat_value
 
     def should_intervene(self) -> bool:
@@ -106,7 +111,8 @@ def test_idle_action_matches_default_and_zero_remote(teleop):
 
 
 def test_hat_up_tilts_and_saturates(teleop):
-    teleop.gamepad.hat_value = (0, 1)
+    layout = teleop.config.layout
+    teleop.gamepad.buttons.add(layout.dpad_up)
     clock = {"t": 0.0}
     with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
         teleop.get_action()
@@ -122,16 +128,18 @@ def test_hat_up_tilts_and_saturates(teleop):
 
 
 def test_hat_pan_saturates_both_directions(teleop):
+    layout = teleop.config.layout
     clock = {"t": 0.0}
     with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
         teleop.get_action()
-        teleop.gamepad.hat_value = (1, 0)
+        teleop.gamepad.buttons.add(layout.dpad_right)
         for _ in range(200):
             clock["t"] += 0.05
             action = teleop.get_action()
         assert action["xl330_joint.q"] == pytest.approx(-0.7, abs=1e-6)
 
-        teleop.gamepad.hat_value = (-1, 0)
+        teleop.gamepad.buttons.discard(layout.dpad_right)
+        teleop.gamepad.buttons.add(layout.dpad_left)
         for _ in range(400):
             clock["t"] += 0.05
             action = teleop.get_action()
@@ -192,12 +200,14 @@ def test_body_keys_never_change(teleop):
     body_keys = [k for k in default if k.endswith(".q") and not k.startswith(("xl330", "d455"))]
     body_keys = [k for k in body_keys if "hand" not in k]
 
+    layout = teleop.config.layout
     clock = {"t": 0.0}
     with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
         teleop.get_action()
-        teleop.gamepad.hat_value = (1, 1)
-        teleop.gamepad.buttons.add(teleop.config.layout.button_rb)
-        teleop.gamepad.buttons.add(teleop.config.layout.button_lb)
+        teleop.gamepad.buttons.add(layout.dpad_up)
+        teleop.gamepad.buttons.add(layout.dpad_right)
+        teleop.gamepad.buttons.add(layout.button_rb)
+        teleop.gamepad.buttons.add(layout.button_lb)
         for _ in range(20):
             clock["t"] += 0.05
             action = teleop.get_action()
@@ -282,3 +292,97 @@ def test_get_action_before_connect_raises():
     teleop = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig())
     with pytest.raises(DeviceNotConnectedError):
         teleop.get_action()
+
+
+def test_default_config_uses_dualshock4_hidapi_preset():
+    cfg = UnitreeG1AhGamepadTeleopConfig()
+    assert cfg.preset == "dualshock4_hidapi"
+    assert cfg.layout.button_rb == 10
+    assert cfg.layout.hat is None
+    assert cfg.layout.dpad_up == 11
+
+
+def test_xbox_preset_gives_expected_layout():
+    cfg = UnitreeG1AhGamepadTeleopConfig(preset="xbox")
+    assert cfg.layout.button_rb == 5
+    assert cfg.layout.hat == 0
+    assert cfg.layout.dpad_up is None
+
+
+def test_dualshock4_kernel_preset_gives_expected_layout():
+    cfg = UnitreeG1AhGamepadTeleopConfig(preset="dualshock4_kernel")
+    assert cfg.layout.button_rb == 5
+    assert cfg.layout.button_y == 2
+
+
+def test_explicit_layout_override_preserved_with_default_preset():
+    cfg = UnitreeG1AhGamepadTeleopConfig(layout=GamepadLayout(button_rb=99))
+    assert cfg.layout.button_rb == 99
+
+
+def test_invalid_preset_raises():
+    with pytest.raises(ValueError):
+        UnitreeG1AhGamepadTeleopConfig(preset="not_a_real_preset")
+
+
+def test_dpad_buttons_tilt_same_as_hat(teleop):
+    clock = {"t": 0.0}
+    layout = teleop.config.layout
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        teleop.get_action()
+        teleop.gamepad.buttons.add(layout.dpad_up)
+        for _ in range(200):
+            clock["t"] += 0.05
+            action = teleop.get_action()
+        assert action["d455_joint.q"] == pytest.approx(0.8, abs=1e-6)
+
+
+class _FakeJoystick:
+    def __init__(self, numhats=1, hat_value=(0, 0), buttons=None):
+        self._numhats = numhats
+        self._hat_value = hat_value
+        self._buttons = buttons or set()
+
+    def get_numhats(self):
+        return self._numhats
+
+    def get_hat(self, index):
+        return self._hat_value
+
+    def get_button(self, index):
+        return index in self._buttons
+
+
+@skip_if_package_missing("pygame")
+def test_hat_uses_dpad_buttons_when_configured():
+    from lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input import UnitreeG1AhGamepadInput
+
+    layout = GamepadLayout.dualshock4_hidapi()
+    gamepad = UnitreeG1AhGamepadInput(layout, deadzone=0.1)
+    gamepad.joystick = _FakeJoystick(numhats=0, buttons={layout.dpad_right, layout.dpad_up})
+    assert gamepad.hat() == (1, 1)
+
+
+@skip_if_package_missing("pygame")
+def test_hat_falls_back_to_hat_axis_when_no_dpad_buttons():
+    from lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input import UnitreeG1AhGamepadInput
+
+    layout = GamepadLayout.dualshock4_kernel()
+    gamepad = UnitreeG1AhGamepadInput(layout, deadzone=0.1)
+    gamepad.joystick = _FakeJoystick(numhats=1, hat_value=(-1, 1))
+    assert gamepad.hat() == (-1, 1)
+
+
+def test_dpad_from_buttons_helper():
+    layout = GamepadLayout.dualshock4_hidapi()
+
+    class _Gamepad:
+        def __init__(self, buttons):
+            self._buttons = buttons
+
+        def button(self, index):
+            return index in self._buttons
+
+    assert _dpad_from_buttons(_Gamepad({layout.dpad_left}), layout) == (-1, 0)
+    assert _dpad_from_buttons(_Gamepad({layout.dpad_down}), layout) == (0, -1)
+    assert _dpad_from_buttons(_Gamepad(set()), layout) == (0, 0)
