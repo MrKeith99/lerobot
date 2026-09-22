@@ -81,6 +81,9 @@ class UnitreeG1Ah(UnitreeG1):
         self._headhand_stale_logged = False
         self._headhand_warned_names: set[str] = set()
         self._invalid_slots = np.array(G1_23_INVALID_SDK_SLOTS)
+        # send_action (main thread) and the locomotion controller thread both publish lowcmd;
+        # CycloneDDS delivers rt/lowcmd inline to in-process readers, so writes must not overlap.
+        self._lowcmd_lock = threading.Lock()
 
     @property
     def _motors_ft(self) -> dict[str, type]:
@@ -112,7 +115,8 @@ class UnitreeG1Ah(UnitreeG1):
             tau_arr[self._invalid_slots] = 0.0
 
         body_action = {k: v for k, v in action.items() if k not in INVALID_BODY_KEYS}
-        super().publish_lowcmd(body_action, kp=kp_arr, kd=kd_arr, tau=tau_arr)
+        with self._lowcmd_lock:
+            super().publish_lowcmd(body_action, kp=kp_arr, kd=kd_arr, tau=tau_arr)
 
     def _check_mode_machine(self) -> None:
         if not self.config.check_mode_machine:
