@@ -187,6 +187,13 @@ unitree_g1 = [
     "lerobot[matplotlib-dep]",
     "lerobot[pygame-dep]",
 ]
+g1ah = [
+    "lerobot[unitree_g1]",
+    "lerobot[dynamixel]",
+    "lerobot[feetech]",
+    "lerobot[gamepad]",
+    "lerobot[intelrealsense]",
+]
 # reachy2-sdk caps grpcio<=1.73.1 and protobuf<=6.32.0; quarantined here so downstream users aren't held back. reachy2-sdk is unlikely to release new versions.
 reachy2 = [
     "reachy2_sdk>=1.0.15,<1.1.0",
@@ -336,6 +343,7 @@ all = [
     "lerobot[topreward]",
     "lerobot[peft]",
     # "lerobot[unitree_g1]", TODO: Unitree requires specific installation instructions for unitree_sdk2
+    # "lerobot[g1ah]", depends on lerobot[unitree_g1]
 ]
 
 [project.scripts]

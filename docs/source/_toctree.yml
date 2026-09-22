@@ -157,6 +157,8 @@
     title: Reachy 2
   - local: unitree_g1
     title: Unitree G1
+  - local: g1ah
+    title: Unitree G1 + AmazingHand
   - local: earthrover_mini_plus
     title: Earth Rover Mini
   - local: omx
