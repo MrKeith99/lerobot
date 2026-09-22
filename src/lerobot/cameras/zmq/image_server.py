@@ -31,8 +31,10 @@ import cv2
 import numpy as np
 import zmq
 
+from ..camera import Camera
 from ..configs import ColorMode
 from ..opencv import OpenCVCamera, OpenCVCameraConfig
+from ..realsense import RealSenseCamera, RealSenseCameraConfig
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ def encode_image(image: np.ndarray, quality: int = 80) -> str:
 class CameraCaptureThread:
     """Background thread that continuously captures and encodes frames from a camera."""
 
-    def __init__(self, camera: OpenCVCamera, name: str):
+    def __init__(self, camera: Camera, name: str):
         self.camera = camera
         self.name = name
         self.latest_encoded: str | None = None  # Pre-encoded JPEG as base64
@@ -92,20 +94,37 @@ class ImageServer:
     def __init__(self, config: dict, port: int = 5555):
         # fps controls the publish loop rate (how often frames are sent over ZMQ), not the camera capture rate
         self.fps = config.get("fps", 30)
-        self.cameras: dict[str, OpenCVCamera] = {}
+        self.cameras: dict[str, Camera] = {}
         self.capture_threads: dict[str, CameraCaptureThread] = {}
 
         for name, cfg in config.get("cameras", {}).items():
             shape = cfg.get("shape", [480, 640])
-            cam_config = OpenCVCameraConfig(
-                index_or_path=cfg.get("device_id", 0),
-                fps=self.fps,
-                width=shape[1],
-                height=shape[0],
-                fourcc=cfg.get("fourcc", "MJPG"),
-                color_mode=ColorMode.RGB,
-            )
-            camera = OpenCVCamera(cam_config)
+            camera_type = cfg.get("type", "opencv")
+            if camera_type == "intelrealsense":
+                rs_config = RealSenseCameraConfig(
+                    serial_number_or_name=cfg["serial_number_or_name"],
+                    fps=self.fps,
+                    width=shape[1],
+                    height=shape[0],
+                    color_mode=ColorMode.RGB,
+                    use_rgb=True,
+                    use_depth=False,
+                    warmup_s=cfg.get("warmup_s", 1),
+                    exposure=cfg.get("exposure"),
+                    gain=cfg.get("gain"),
+                    white_balance=cfg.get("white_balance"),
+                )
+                camera = RealSenseCamera(rs_config)
+            else:
+                cam_config = OpenCVCameraConfig(
+                    index_or_path=cfg.get("device_id", 0),
+                    fps=self.fps,
+                    width=shape[1],
+                    height=shape[0],
+                    fourcc=cfg.get("fourcc", "MJPG"),
+                    color_mode=ColorMode.RGB,
+                )
+                camera = OpenCVCamera(cam_config)
             camera.connect()
             self.cameras[name] = camera
             logger.info(f"Camera {name}: {shape[1]}x{shape[0]}")
