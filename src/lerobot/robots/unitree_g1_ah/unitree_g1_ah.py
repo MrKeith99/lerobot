@@ -75,9 +75,8 @@ class UnitreeG1Ah(UnitreeG1):
     def __init__(self, config: UnitreeG1AhConfig):
         self.name = config.robot_type_name
         super().__init__(config)
-        self.headhand = HeadHandZmqClient(
-            config.robot_ip, config.headhand_state_port, config.headhand_cmd_port
-        )
+        headhand_ip = config.headhand_ip or ("127.0.0.1" if config.is_simulation else config.robot_ip)
+        self.headhand = HeadHandZmqClient(headhand_ip, config.headhand_state_port, config.headhand_cmd_port)
         self._headhand_ticks: dict[str, int] = {}
         self._headhand_stale_logged = False
         self._headhand_warned_names: set[str] = set()
@@ -147,7 +146,12 @@ class UnitreeG1Ah(UnitreeG1):
             )
 
         if calibrate and not self.is_calibrated:
-            self.calibrate()
+            if self.config.is_simulation:
+                logger.info("Simulation mode: writing default head/hand calibration.")
+                self.calibration = {name: default_calibration(name) for name in HEAD_HAND_MOTORS}
+                self._save_calibration()
+            else:
+                self.calibrate()
 
         self.configure()
 

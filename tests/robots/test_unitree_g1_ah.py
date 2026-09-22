@@ -292,3 +292,117 @@ class TestG1AhHeadhandTimeout:
             robot._save_calibration()
             with pytest.raises(TimeoutError):
                 robot.connect(calibrate=False)
+
+
+class TestG1AhHeadhandIp:
+    def test_sim_mode_defaults_to_localhost(self, headhand_server, tmp_path):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            from lerobot.robots.unitree_g1_ah.unitree_g1_ah import UnitreeG1Ah
+
+            cfg = UnitreeG1AhConfig(
+                robot_ip="192.168.123.164",
+                is_simulation=True,
+                headhand_state_port=headhand_server.state_port,
+                headhand_cmd_port=headhand_server.cmd_port,
+                calibration_dir=tmp_path,
+                id="test",
+            )
+            robot = UnitreeG1Ah(cfg)
+            assert robot.headhand.ip == "127.0.0.1"
+
+    def test_real_mode_defaults_to_robot_ip(self, headhand_server, tmp_path):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            from lerobot.robots.unitree_g1_ah.unitree_g1_ah import UnitreeG1Ah
+
+            cfg = UnitreeG1AhConfig(
+                robot_ip="192.168.123.164",
+                is_simulation=False,
+                headhand_state_port=headhand_server.state_port,
+                headhand_cmd_port=headhand_server.cmd_port,
+                calibration_dir=tmp_path,
+                id="test",
+            )
+            robot = UnitreeG1Ah(cfg)
+            assert robot.headhand.ip == "192.168.123.164"
+
+    def test_headhand_ip_override_wins_in_simulation(self, headhand_server, tmp_path):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            from lerobot.robots.unitree_g1_ah.unitree_g1_ah import UnitreeG1Ah
+
+            cfg = UnitreeG1AhConfig(
+                robot_ip="192.168.123.164",
+                is_simulation=True,
+                headhand_ip="10.0.0.5",
+                headhand_state_port=headhand_server.state_port,
+                headhand_cmd_port=headhand_server.cmd_port,
+                calibration_dir=tmp_path,
+                id="test",
+            )
+            robot = UnitreeG1Ah(cfg)
+            assert robot.headhand.ip == "10.0.0.5"
+
+
+class TestG1AhSimulationConnect:
+    def test_sim_connect_with_empty_calibration_writes_defaults(self, headhand_server, tmp_path):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+
+        fake_inner_env = MagicMock()
+        fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            stack.enter_context(
+                patch(
+                    "lerobot.robots.unitree_g1.unitree_g1._SDKChannelFactoryInitialize",
+                    MagicMock(),
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "lerobot.robots.unitree_g1.unitree_g1._SDKChannelPublisher",
+                    MagicMock(return_value=mocks["publisher_mock"]),
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "lerobot.robots.unitree_g1.unitree_g1._SDKChannelSubscriber",
+                    MagicMock(return_value=mocks["subscriber_mock"]),
+                )
+            )
+            stack.enter_context(patch("lerobot.envs.make_env", return_value=fake_env_wrapper))
+
+            from lerobot.robots.unitree_g1_ah.unitree_g1_ah import UnitreeG1Ah
+
+            cfg = UnitreeG1AhConfig(
+                robot_ip="127.0.0.1",
+                is_simulation=True,
+                headhand_state_port=headhand_server.state_port,
+                headhand_cmd_port=headhand_server.cmd_port,
+                calibration_dir=tmp_path,
+                id="test",
+            )
+            robot = UnitreeG1Ah(cfg)
+            assert robot.calibration == {}
+
+            robot.connect(calibrate=True)
+            try:
+                assert robot.is_calibrated
+                for name in HEAD_HAND_MOTORS:
+                    assert robot.calibration[name] == default_calibration(name)
+                assert robot.calibration_fpath.is_file()
+            finally:
+                robot.disconnect()
