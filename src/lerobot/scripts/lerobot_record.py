@@ -141,6 +141,7 @@ from lerobot.teleoperators import (  # noqa: F401
     bi_openarm_mini,
     bi_rebot_102_leader,
     bi_so_leader,
+    g1ah_gamepad,
     homunculus,
     koch_leader,
     make_teleoperator_from_config,
