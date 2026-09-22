@@ -169,7 +169,7 @@ class HeadHandServer:
         cmd_port: int = HEADHAND_CMD_PORT,
         rate_hz: float = 50.0,
         context: zmq.Context | None = None,
-        bind_address: str = "0.0.0.0",
+        bind_address: str = "*",
     ) -> None:
         self.device = device
         self.state_port = state_port

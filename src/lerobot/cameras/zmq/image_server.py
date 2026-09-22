@@ -100,6 +100,7 @@ class ImageServer:
         for name, cfg in config.get("cameras", {}).items():
             shape = cfg.get("shape", [480, 640])
             camera_type = cfg.get("type", "opencv")
+            camera: Camera
             if camera_type == "intelrealsense":
                 rs_config = RealSenseCameraConfig(
                     serial_number_or_name=cfg["serial_number_or_name"],
