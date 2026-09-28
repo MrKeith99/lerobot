@@ -48,7 +48,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from lerobot.utils.import_utils import _pynput_available
+from lerobot.utils.import_utils import _pygame_available, _pynput_available
 from lerobot.utils.keyboard_input import pynput_can_capture
 
 from ..utils import TeleopEvents
@@ -58,6 +58,20 @@ if TYPE_CHECKING or _pynput_available:
     import pynput.keyboard as pynput_keyboard
 else:
     pynput_keyboard = None  # type: ignore[assignment]
+
+if TYPE_CHECKING or _pygame_available:
+    import pygame
+else:
+    pygame = None  # type: ignore[assignment]
+
+_WINDOW_HELP = (
+    "UnitreeG1Ah keyboard teleop - keep this window focused",
+    "arrows: head pan/tilt      q / e: close left / right hand",
+    "w a s d: left stick         i j k l: right stick",
+    "y / n / r: success / failure / rerecord   space: intervene",
+    "Esc: stop",
+)
+_PYGAME_KEY_NAMES = {"escape": "esc", "return": "enter"}
 
 _ARROW_HAT: dict[str, tuple[int, int]] = {
     "left": (-1, 0),
@@ -102,13 +116,23 @@ class UnitreeG1AhKeyboardInput:
         self._tap_expiry: dict[str, float] = {}
         self._lock = threading.Lock()
         self._listener = None
+        self._window = None
+        self._font = None
         self.running = True
         self.intervention_flag = False
         self.episode_end_status: TeleopEvents | None = None
 
     def start(self) -> None:
-        with _ACTIVE_LOCK:
-            _ACTIVE_INPUTS.add(self)
+        backend = self.config.backend
+        if backend == "external":
+            with _ACTIVE_LOCK:
+                _ACTIVE_INPUTS.add(self)
+            return
+        if backend == "window":
+            self._open_window()
+            return
+        if backend != "pynput":
+            raise ValueError(f"Unknown keyboard backend {backend!r}; use 'window', 'pynput' or 'external'")
         if not (_pynput_available and pynput_can_capture()):
             logging.warning(
                 "pynput cannot capture keys in this session (Wayland/headless). Keys are only taken "
@@ -124,9 +148,51 @@ class UnitreeG1AhKeyboardInput:
         if self._listener is not None:
             self._listener.stop()
             self._listener = None
+        if self._window is not None:
+            pygame.display.quit()
+            self._window = None
         self.running = False
 
+    def _open_window(self) -> None:
+        """Open the dedicated key-capture window (pygame/SDL: works on X11 and Wayland)."""
+        if not _pygame_available:
+            logging.warning(
+                "pygame is not installed; keyboard teleop has no input. pip install 'lerobot[gamepad]'"
+            )
+            return
+        pygame.init()
+        self._window = pygame.display.set_mode(self.config.window_size)
+        pygame.display.set_caption("UnitreeG1Ah teleop keys")
+        self._font = pygame.font.SysFont(None, 22)
+        self._draw_window()
+
+    def _draw_window(self) -> None:
+        self._window.fill((25, 25, 30))
+        for i, line in enumerate(_WINDOW_HELP):
+            self._window.blit(self._font.render(line, True, (230, 230, 230)), (12, 14 + 26 * i))
+        with self._lock:
+            held = " ".join(sorted(self._pressed))
+        self._window.blit(
+            self._font.render(f"held: {held}", True, (120, 220, 120)), (12, 14 + 26 * len(_WINDOW_HELP) + 14)
+        )
+        pygame.display.flip()
+
+    def _pump_window(self) -> None:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+            elif event.type in (pygame.KEYDOWN, pygame.KEYUP):
+                name = pygame.key.name(event.key)
+                name = _PYGAME_KEY_NAMES.get(name, name)
+                if event.type == pygame.KEYDOWN:
+                    self.press(name)
+                else:
+                    self.release(name)
+        self._draw_window()
+
     def update(self) -> None:
+        if self._window is not None:
+            self._pump_window()
         now = time.monotonic()
         with self._lock:
             expired = [name for name, until in self._tap_expiry.items() if until <= now]

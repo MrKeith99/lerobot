@@ -39,3 +39,7 @@ class UnitreeG1AhKeyboardTeleopConfig(UnitreeG1AhGamepadTeleopConfig):
     """
 
     remote_axis_value: float = 0.6
+    # "window": keys are read from a small dedicated window (works on Wayland, no viewer key
+    # clashes); "pynput": global capture (X11 only); "external": in-process feed only.
+    backend: str = "window"
+    window_size: tuple[int, int] = (420, 260)

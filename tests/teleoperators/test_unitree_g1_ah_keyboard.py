@@ -161,7 +161,7 @@ def test_esc_stops_running(keyboard_input):
 
 
 def test_start_without_pynput_logs_warning_and_runs_with_no_keys(caplog):
-    ki = UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig())
+    ki = UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig(backend="pynput"))
     with (
         patch(
             "lerobot.teleoperators.unitree_g1_ah_keyboard.keyboard_input.pynput_can_capture",
@@ -313,7 +313,7 @@ def test_make_teleoperator_from_config_returns_class_without_importing_pynput():
 def test_external_key_event_taps_then_releases(monkeypatch):
     from lerobot.teleoperators.unitree_g1_ah_keyboard import keyboard_input as kb
 
-    inp = kb.UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig())
+    inp = kb.UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig(backend="external"))
     monkeypatch.setattr(kb, "_pynput_available", False)
     inp.start()
     try:
@@ -334,3 +334,34 @@ def test_external_key_event_taps_then_releases(monkeypatch):
         inp.stop()
     kb.external_key_event("e")
     assert not inp.button(inp.config.layout.button_rb)
+
+
+def test_window_backend_pumps_key_events(monkeypatch):
+    from types import SimpleNamespace
+
+    from lerobot.teleoperators.unitree_g1_ah_keyboard import keyboard_input as kb
+
+    inp = kb.UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig(backend="window"))
+    batches = [
+        [SimpleNamespace(type="down", key=1)],
+        [
+            SimpleNamespace(type="up", key=1),
+            SimpleNamespace(type="down", key=2),
+            SimpleNamespace(type="up", key=2),
+        ],
+    ]
+    fake_pygame = SimpleNamespace(
+        QUIT="quit",
+        KEYDOWN="down",
+        KEYUP="up",
+        event=SimpleNamespace(get=lambda: batches.pop(0)),
+        key=SimpleNamespace(name=lambda k: {1: "w", 2: "escape"}[k]),
+    )
+    monkeypatch.setattr(kb, "pygame", fake_pygame)
+    monkeypatch.setattr(inp, "_draw_window", lambda: None)
+    inp._window = object()
+    inp.update()
+    assert inp.axis(inp.config.layout.left_y) < 0  # w held -> left stick forward (pygame y is down)
+    inp.update()
+    assert inp.axis(inp.config.layout.left_y) == 0
+    assert not inp.running  # esc
