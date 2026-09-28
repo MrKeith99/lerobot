@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from lerobot.utils.import_utils import _pynput_available
@@ -71,12 +72,34 @@ _EPISODE_KEYS: dict[str, TeleopEvents] = {
 }
 
 
+_ACTIVE_INPUTS: set[UnitreeG1AhKeyboardInput] = set()
+_ACTIVE_LOCK = threading.Lock()
+
+
+def external_key_event(name: str, hold_s: float = 0.35) -> None:
+    """Feed a key press from another in-process source (e.g. the MuJoCo viewer window).
+
+    Wayland sessions hide keystrokes from `pynput`, so the simulator forwards its GLFW key
+    events here instead. Each call marks `name` as held for `hold_s`; key-repeat events refresh
+    the timer, so a physically held key behaves like a held key and a tap like a short press.
+    """
+    with _ACTIVE_LOCK:
+        inputs = list(_ACTIVE_INPUTS)
+    for kb in inputs:
+        kb.tap(name, hold_s)
+
+
 class UnitreeG1AhKeyboardInput:
-    """`pynput`-backed keyboard input exposing the same interface as `UnitreeG1AhGamepadInput`."""
+    """Keyboard input exposing the same interface as `UnitreeG1AhGamepadInput`.
+
+    Keys come from `pynput` when it can capture (X11) and/or from `external_key_event`
+    (in-process sources such as the simulator's viewer window).
+    """
 
     def __init__(self, config: UnitreeG1AhKeyboardTeleopConfig):
         self.config = config
         self._pressed: set[str] = set()
+        self._tap_expiry: dict[str, float] = {}
         self._lock = threading.Lock()
         self._listener = None
         self.running = True
@@ -84,26 +107,41 @@ class UnitreeG1AhKeyboardInput:
         self.episode_end_status: TeleopEvents | None = None
 
     def start(self) -> None:
+        with _ACTIVE_LOCK:
+            _ACTIVE_INPUTS.add(self)
         if not (_pynput_available and pynput_can_capture()):
             logging.warning(
-                "Keyboard teleoperation is unavailable in this environment. pynput can only "
-                "capture key events on an X11 session (Linux), a Windows desktop, or macOS with "
-                "Accessibility / Input Monitoring granted - not on Wayland or headless machines. "
-                "This keyboard teleoperator will produce no actions; use an X11 session or a "
-                "gamepad teleoperator instead."
+                "pynput cannot capture keys in this session (Wayland/headless). Keys are only taken "
+                "from in-process sources such as the MuJoCo viewer window (focus it and type)."
             )
             return
         self._listener = pynput_keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._listener.start()
 
     def stop(self) -> None:
+        with _ACTIVE_LOCK:
+            _ACTIVE_INPUTS.discard(self)
         if self._listener is not None:
             self._listener.stop()
             self._listener = None
         self.running = False
 
     def update(self) -> None:
-        pass
+        now = time.monotonic()
+        with self._lock:
+            expired = [name for name, until in self._tap_expiry.items() if until <= now]
+        for name in expired:
+            with self._lock:
+                self._tap_expiry.pop(name, None)
+            self.release(name)
+
+    def tap(self, name: str, hold_s: float = 0.35) -> None:
+        """Hold `name` for `hold_s` seconds (refreshed on repeat), then release it in `update()`."""
+        with self._lock:
+            already = name in self._tap_expiry
+            self._tap_expiry[name] = time.monotonic() + hold_s
+        if not already:
+            self.press(name)
 
     def press(self, name: str) -> None:
         """Test/manual helper: mark `name` as held (see `_key_name` for the naming scheme)."""

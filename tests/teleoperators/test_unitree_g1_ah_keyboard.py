@@ -170,7 +170,7 @@ def test_start_without_pynput_logs_warning_and_runs_with_no_keys(caplog):
         caplog.at_level("WARNING"),
     ):
         ki.start()
-    assert "unavailable" in caplog.text
+    assert "cannot capture" in caplog.text
     assert ki.hat() == (0, 0)
     assert ki.is_running
 
@@ -308,3 +308,29 @@ def test_make_teleoperator_from_config_returns_class_without_importing_pynput():
     assert isinstance(teleop, UnitreeG1AhKeyboardTeleop)
     assert not teleop.is_connected
     assert "pynput" not in sys.modules
+
+
+def test_external_key_event_taps_then_releases(monkeypatch):
+    from lerobot.teleoperators.unitree_g1_ah_keyboard import keyboard_input as kb
+
+    inp = kb.UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig())
+    monkeypatch.setattr(kb, "_pynput_available", False)
+    inp.start()
+    try:
+        clock = [100.0]
+        monkeypatch.setattr(kb.time, "monotonic", lambda: clock[0])
+        kb.external_key_event("e", hold_s=0.3)
+        inp.update()
+        assert inp.button(inp.config.layout.button_rb)
+        clock[0] += 0.2
+        kb.external_key_event("e", hold_s=0.3)
+        clock[0] += 0.2
+        inp.update()
+        assert inp.button(inp.config.layout.button_rb)
+        clock[0] += 0.4
+        inp.update()
+        assert not inp.button(inp.config.layout.button_rb)
+    finally:
+        inp.stop()
+    kb.external_key_event("e")
+    assert not inp.button(inp.config.layout.button_rb)
