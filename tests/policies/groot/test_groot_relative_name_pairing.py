@@ -32,6 +32,7 @@ from lerobot.policies.groot.processor_groot import (
     GrootReorderStateStep,
     _infer_n1_7_action_groups,
     _name_pairing_plan,
+    _permute_state_stats,
     make_groot_pre_post_processors,
 )
 from lerobot.processor import PolicyProcessorPipeline
@@ -80,7 +81,6 @@ def test_name_pairing_plan_matches_index_pairing_for_aligned_layouts():
 @pytest.mark.parametrize(
     "action_names, state_names, message",
     [
-        (["a", "b", "c"], ["a", "b"], "at least as many"),
         (["a"], ["a", "a"], "unique"),
         (["x"], ["a", "b"], "no action feature"),
         (["kLeftElbow", "kLeftElbow.q"], ["kLeftElbow.q", "b"], "substring"),
@@ -287,3 +287,107 @@ def test_name_pairing_rejects_missing_state_names(tmp_path, monkeypatch):
     meta = SimpleNamespace(stats={}, features={ACTION: {"names": ACTION_NAMES}})
     with pytest.raises(ValueError, match="feature names"):
         make_groot_pre_post_processors(config, dataset_stats={}, dataset_meta=meta)
+
+
+# Controller-mode G1 layout: the state is a prefix of the action, which adds nav/height commands.
+SHORT_STATE = ["kLeftShoulderPitch.q", "kLeftElbow.q", "kHeadYaw.q", "kLeftHand.closure"]
+LONG_ACTION = [*SHORT_STATE, "kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd", "kBaseHeight.cmd"]
+
+
+def test_name_pairing_with_state_shorter_than_action_uses_zero_fillers():
+    permutation, exclude = _name_pairing_plan(LONG_ACTION, SHORT_STATE, ["closure"])
+    # closure is excluded, so it takes the one spare state column; commands get zero fillers (-1).
+    assert permutation == [0, 1, 2, 3, -1, -1, -1, -1]
+    assert exclude == ["closure", "kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd", "kBaseHeight.cmd"]
+
+
+def test_reorder_step_inserts_zero_columns():
+    step = GrootReorderStateStep(indices=[1, 0, -1, 2])
+    state = torch.tensor([[1.0, 2.0, 3.0]])
+    out = step({TransitionKey.OBSERVATION: {OBS_STATE: state}})[TransitionKey.OBSERVATION][OBS_STATE]
+    torch.testing.assert_close(out, torch.tensor([[2.0, 1.0, 0.0, 3.0]]))
+    with pytest.raises(ValueError, match="expects 3 state columns"):
+        step({TransitionKey.OBSERVATION: {OBS_STATE: torch.zeros(1, 4)}})
+
+
+def test_permuted_state_stats_give_filler_columns_constant_zero_stats():
+    stats = {
+        "min": torch.tensor([1.0, 2.0]),
+        "max": torch.tensor([3.0, 4.0]),
+        "std": torch.tensor([0.5, 0.5]),
+    }
+    permuted = _permute_state_stats(stats, [1, -1, 0])
+    assert permuted["min"] == [2.0, 0.0, 1.0]
+    assert permuted["max"] == [4.0, 0.0, 3.0]
+    assert permuted["std"] == [0.5, 1.0, 0.5]
+
+
+def test_name_paired_processors_with_short_state(tmp_path, monkeypatch):
+    pytest.importorskip("datasets")
+    input_features, output_features = _groot_features(state_dim=4, action_dim=8)
+    config = GrootConfig(
+        input_features=input_features,
+        output_features=output_features,
+        device="cpu",
+        use_bf16=False,
+        action_decode_transform=None,
+        use_relative_actions=True,
+        relative_exclude_joints=["closure"],
+        relative_action_pairing="name",
+    )
+    states = [torch.tensor([0.3, 1.2, 0.1, 0.4]), torch.tensor([0.6, 0.8, -0.2, 0.9])]
+
+    def rows(state, delta):
+        return [state[0] + delta, state[1] + delta, state[2] + delta, 1.0, 0.5, 0.0, -0.3, 0.7]
+
+    samples = [
+        {OBS_STATE: st, ACTION: _native_action_chunk([rows(st, 0.02), rows(st, 0.04)])} for st in states
+    ]
+    all_actions = torch.cat([sample[ACTION] for sample in samples])
+    stacked = torch.stack(states)
+    stats = {
+        OBS_STATE: {"min": stacked.min(0).values, "max": stacked.max(0).values},
+        ACTION: {"min": all_actions.min(0).values, "max": all_actions.max(0).values},
+    }
+    meta = SimpleNamespace(
+        repo_id="local/short_state",
+        root=tmp_path,
+        revision="main",
+        fps=30,
+        stats=stats,
+        features={ACTION: {"names": LONG_ACTION}, OBS_STATE: {"names": SHORT_STATE}},
+    )
+
+    class _Dataset:
+        def __len__(self):
+            return len(samples)
+
+        def __getitem__(self, idx):
+            return samples[idx]
+
+    _Dataset.meta = meta
+    monkeypatch.setattr("lerobot.policies.groot.processor_groot.LeRobotDataset", lambda *a, **k: _Dataset())
+    config._runtime_dataset_meta = meta
+    preprocessor, _ = make_groot_pre_post_processors(config, dataset_stats=stats)
+
+    reorder = next(step for step in preprocessor.steps if isinstance(step, GrootReorderStateStep))
+    assert reorder.indices == [0, 1, 2, 3, -1, -1, -1, -1]
+    pack = next(step for step in preprocessor.steps if isinstance(step, GrootN17PackInputsStep))
+    action_cfg = pack.modality_config["action"]
+    reps = [cfg["rep"] for cfg in action_cfg["action_configs"]]
+    assert reps[0] == "RELATIVE" and set(reps[1:]) == {"ABSOLUTE"}
+    rel = pack.raw_stats["relative_action"][action_cfg["modality_keys"][0]]
+    assert rel["min"][0] == pytest.approx([0.02, 0.02, 0.02])
+    assert pack.stats[OBS_STATE]["min"][4:] == pytest.approx([0.0] * 4)
+
+
+def test_index_pairing_rejects_state_shorter_than_action():
+    input_features, output_features = _groot_features(state_dim=4, action_dim=8)
+    config = GrootConfig(
+        input_features=input_features,
+        output_features=output_features,
+        device="cpu",
+        use_relative_actions=True,
+    )
+    with pytest.raises(ValueError, match="relative_action_pairing='name'"):
+        make_groot_pre_post_processors(config, dataset_stats={})

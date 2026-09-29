@@ -652,16 +652,12 @@ def _name_pairing_plan(
     """Pair each action column with the same-named observation.state column for relative actions.
 
     Returns a state-column permutation that places every paired state column at its action column's
-    index (unpaired positions take unused columns, the remaining columns follow), and the exclude list
-    extended with the action names that have no state counterpart, so they stay absolute.
+    index (unpaired positions take unused columns, or -1 = a zero column once none are left; the
+    remaining columns follow), and the exclude list extended with the action names that have no state
+    counterpart, so they stay absolute.
     """
     if len(set(state_names)) != len(state_names):
         raise ValueError("relative_action_pairing='name' needs unique observation.state feature names.")
-    if len(state_names) < len(action_names):
-        raise ValueError(
-            "relative_action_pairing='name' needs at least as many observation.state features as action "
-            f"features, got {len(state_names)} state and {len(action_names)} action features."
-        )
     state_index = {name: index for index, name in enumerate(state_names)}
     paired: list[int | None] = []
     effective_exclude = list(exclude_joints)
@@ -687,9 +683,41 @@ def _name_pairing_plan(
     used = {index for index in paired if index is not None}
     unused = [index for index in range(len(state_names)) if index not in used]
     fillers = iter(unused)
-    permutation = [index if index is not None else next(fillers) for index in paired]
+    permutation = [index if index is not None else next(fillers, _ZERO_STATE_COLUMN) for index in paired]
     permutation.extend(fillers)
     return permutation, effective_exclude
+
+
+_ZERO_STATE_COLUMN = -1
+
+
+def _permute_state_columns(state: Any, permutation: list[int]) -> Any:
+    """Reorder the last dim of `state` by `permutation`; -1 entries become zero columns."""
+    if isinstance(state, torch.Tensor):
+        padded = torch.cat([state, torch.zeros_like(state[..., :1])], dim=-1)
+        index = torch.as_tensor(permutation, device=state.device)
+        return padded.index_select(-1, torch.where(index < 0, state.shape[-1], index))
+    state = np.asarray(state)
+    padded = np.concatenate([state, np.zeros_like(state[..., :1])], axis=-1)
+    return padded[..., [state.shape[-1] if index < 0 else index for index in permutation]]
+
+
+def _permute_state_stats(stats: dict[str, Any], permutation: list[int]) -> dict[str, Any]:
+    """`_slice_stats_entry` by `permutation`, where -1 entries get zero stats (a constant-zero column)."""
+    if _ZERO_STATE_COLUMN not in permutation:
+        return _slice_stats_entry(stats, permutation)
+    padded: dict[str, Any] = {}
+    for stat_name, value in stats.items():
+        tensor = torch.as_tensor(value, dtype=torch.float32)
+        if stat_name == "count" or tensor.ndim == 0:
+            padded[stat_name] = value
+            continue
+        filler = torch.ones_like(tensor[..., :1]) if stat_name == "std" else torch.zeros_like(tensor[..., :1])
+        padded[stat_name] = torch.cat([tensor, filler], dim=-1)
+    width = next(
+        torch.as_tensor(v).shape[-1] for k, v in stats.items() if k != "count" and torch.as_tensor(v).ndim
+    )
+    return _slice_stats_entry(padded, [width if index < 0 else index for index in permutation])
 
 
 def _name_pairing_plan_from_dataset_meta(
@@ -877,7 +905,7 @@ def _make_relative_action_training_stats(
         state = _to_float_tensor(state_value, key=OBS_STATE)
         state_batch = _state_reference_batch(state)
         if state_permutation is not None:
-            state_batch = state_batch[..., state_permutation]
+            state_batch = _permute_state_columns(state_batch, state_permutation)
         action_batch = _action_training_batch(action, state_batch)
         if action_batch.shape[0] != state_batch.shape[0]:
             if state_batch.shape[0] == 1:
@@ -1133,7 +1161,7 @@ def _build_n1_7_relative_action_processor_assets(
     if not state_stats or not absolute_action_stats or not relative_action_stats:
         return None
     if state_permutation is not None:
-        state_stats = _slice_stats_entry(state_stats, state_permutation)
+        state_stats = _permute_state_stats(state_stats, state_permutation)
 
     raw_stats: dict[str, Any] = {
         "state": _group_stats_by_action_groups(state_stats, groups),
@@ -1277,6 +1305,15 @@ def make_groot_pre_post_processors(
     checkpoint_has_stats = has_modality_stats(checkpoint_stats)
     state_permutation: list[int] | None = None
     relative_exclude: list[str] | None = None
+    if config.use_relative_actions and config.relative_action_pairing == "index":
+        state_ft = (config.input_features or {}).get(OBS_STATE)
+        action_ft = (config.output_features or {}).get(ACTION)
+        if state_ft is not None and action_ft is not None and state_ft.shape[0] < action_ft.shape[0]:
+            raise ValueError(
+                f"Relative actions pair action column i with observation.state column i, but the state has "
+                f"{state_ft.shape[0]} columns and the action {action_ft.shape[0]}. Set "
+                "relative_action_pairing='name' to pair by feature name instead."
+            )
     if config.use_relative_actions and config.relative_action_pairing == "name":
         if checkpoint_has_stats:
             raise ValueError(
@@ -1656,7 +1693,8 @@ class GrootReorderStateStep(ProcessorStep):
     """Permute observation.state columns by `indices` (relative_action_pairing='name').
 
     Puts each relative action's same-named state column at that action's index, so GR00T's positional
-    relative-action conversion pairs them correctly. Runs identically at training and inference.
+    relative-action conversion pairs them correctly; -1 inserts a zero column (a state shorter than the
+    action). Runs identically at training and inference.
     """
 
     indices: list[int] = field(default_factory=list)
@@ -1666,14 +1704,12 @@ class GrootReorderStateStep(ProcessorStep):
         if not self.indices or not observation or OBS_STATE not in observation:
             return transition
         state = observation[OBS_STATE]
-        if state.shape[-1] != len(self.indices):
+        expected = sum(index >= 0 for index in self.indices)
+        if state.shape[-1] != expected:
             raise ValueError(
-                f"GrootReorderStateStep expects {len(self.indices)} state columns, got {state.shape[-1]}."
+                f"GrootReorderStateStep expects {expected} state columns, got {state.shape[-1]}."
             )
-        if isinstance(state, torch.Tensor):
-            reordered = state.index_select(-1, torch.as_tensor(self.indices, device=state.device))
-        else:
-            reordered = np.asarray(state)[..., self.indices]
+        reordered = _permute_state_columns(state, self.indices)
         new_transition = transition.copy()
         new_transition[TransitionKey.OBSERVATION] = {**observation, OBS_STATE: reordered}
         return new_transition

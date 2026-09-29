@@ -111,7 +111,7 @@ action is arm targets plus velocity/height commands while its state starts with 
 `--policy.relative_action_pairing=name`:
 
 - Each action feature is paired with the `observation.state` feature of the **same name**.
-- Action features with no same-named state (commands such as `remote.lx` or `kBaseHeight.cmd`)
+- Action features with no same-named state (commands such as `kNavVx.cmd` or `kBaseHeight.cmd`)
   stay absolute automatically. `--policy.relative_exclude_joints` still keeps chosen features
   absolute, e.g. `'["gripper"]'` or `'["closure"]'`.
 - Every state column is normalized with its own statistics, including state columns that have no
@@ -119,8 +119,8 @@ action is arm targets plus velocity/height commands while its state starts with 
 
 Internally, a `groot_reorder_state` step permutes the state columns so that each paired state
 column sits at its action's index. The permutation is saved with the processors, so inference
-needs no dataset. `name` pairing requires unique state feature names, at least as many state as
-action features, and the native relative-action path (a base checkpoint such as
+needs no dataset. `name` pairing requires unique state feature names (the state may be shorter than
+the action; missing columns are filled with zeros) and the native relative-action path (a base checkpoint such as
 `nvidia/GR00T-N1.7-3B` with `--policy.embodiment_tag=new_embodiment`).
 
 ## Performance Results
