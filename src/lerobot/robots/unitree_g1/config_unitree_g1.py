@@ -71,3 +71,11 @@ class UnitreeG1Config(RobotConfig):
     # Lower-body controller class name, e.g. "GrootLocomotionController" or
     # "HolosomaLocomotionController". None disables it.
     controller: str | None = None
+
+    # Simulation only: gamepad (pygame) button index that toggles the MuJoCo elastic band, same as
+    # pressing "9" in the viewer. 10 = PS button on a DualShock 4. None disables it.
+    sim_band_toggle_button: int | None = 10
+
+    # Simulation only: gamepad (pygame) button index that resets the robot to its start pose with the
+    # elastic band attached. 9 = Options button on a DualShock 4. None disables it.
+    sim_reset_button: int | None = 9
