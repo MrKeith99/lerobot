@@ -31,8 +31,10 @@ from lerobot.robots.unitree_g1_ah.g1_ah_devices import default_calibration
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
     ARM_MODE_ACTION_KEYS,
+    ARM_MODE_STATE_KEYS,
     CLOSURE_ACTION_KEYS,
     CLOSURE_ARM_MODE_ACTION_KEYS,
+    CLOSURE_ARM_MODE_STATE_KEYS,
     G1_23_BODY_JOINTS,
     HAND_CLOSURE_KEYS,
     HEAD_HAND_MOTORS,
@@ -184,13 +186,17 @@ _MODE_KEYS = {
     "closure": (CLOSURE_ACTION_KEYS, CLOSURE_ARM_MODE_ACTION_KEYS),
     "per_motor": (ALL_ACTION_KEYS, ARM_MODE_ACTION_KEYS),
 }
+_CONTROLLER_STATE_KEYS = {
+    "closure": CLOSURE_ARM_MODE_STATE_KEYS,
+    "per_motor": ARM_MODE_STATE_KEYS,
+}
 
 
 class TestBaseHeightAction:
     def test_stock_default_off_g1ah_default_on(self):
         from lerobot.robots.unitree_g1.config_unitree_g1 import UnitreeG1Config
 
-        assert UnitreeG1Config().base_height_action is False
+        assert UnitreeG1Config().base_height_action is True
         assert UnitreeG1AhConfig().base_height_action is True
 
     @pytest.mark.parametrize(
@@ -309,10 +315,12 @@ class TestG1AhFeatures:
                     "base_height_action": base_height_action,
                 },
             )
-            state_keys, arm_mode_keys = _MODE_KEYS[hand_representation]
+            _, arm_mode_keys = _MODE_KEYS[hand_representation]
+            state_keys = _CONTROLLER_STATE_KEYS[hand_representation]
             expected = list(arm_mode_keys) + (["kBaseHeight.cmd"] if base_height_action else [])
             assert list(robot.action_features) == expected
             assert list(robot.observation_features) == list(state_keys)
+            assert expected[: len(state_keys)] == list(state_keys)
 
 
 def _latest_goal_ticks(headhand_server, names, timeout_s=2.0):

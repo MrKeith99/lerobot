@@ -102,7 +102,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 70
+    assert len(teleop.action_features) == 73
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -409,6 +409,30 @@ def test_base_height_clipped_and_seeded(teleop):
         seeded.connect()
         assert seeded.get_action()["kBaseHeight.cmd"] == pytest.approx(0.6)
         seeded.disconnect()
+
+
+def test_sticks_emit_nav_command(teleop):
+    from lerobot.robots.unitree_g1.g1_utils import NAV_KEYS
+
+    layout = teleop.config.layout
+    teleop.gamepad.axes[layout.left_y] = -0.6
+    teleop.gamepad.axes[layout.left_x] = 0.3
+    teleop.gamepad.axes[layout.right_x] = 0.4
+    action = teleop.get_action()
+    assert action["kNavVx.cmd"] == pytest.approx(0.6)
+    assert action["kNavVy.cmd"] == pytest.approx(-0.3)
+    assert action["kNavYawRate.cmd"] == pytest.approx(-0.4)
+    assert set(NAV_KEYS) <= set(teleop.action_features)
+
+
+def test_nav_command_zero_without_remote_axes():
+    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        t = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig(emit_remote_axes=False))
+        t.connect()
+        t.gamepad.axes[t.config.layout.left_y] = -1.0
+        action = t.get_action()
+        t.disconnect()
+    assert [action[k] for k in ("kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd")] == [0.0, 0.0, 0.0]
 
 
 def test_body_keys_never_change(teleop):

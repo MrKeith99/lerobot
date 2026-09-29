@@ -44,8 +44,10 @@ from .g1_ah_devices import (
 from .g1_ah_joints import (
     ALL_ACTION_KEYS,
     ARM_MODE_ACTION_KEYS,
+    ARM_MODE_STATE_KEYS,
     CLOSURE_ACTION_KEYS,
     CLOSURE_ARM_MODE_ACTION_KEYS,
+    CLOSURE_ARM_MODE_STATE_KEYS,
     G1_23_INVALID_SDK_SLOTS,
     HAND_LIMIT_RAD,
     HAND_SIDES,
@@ -110,7 +112,10 @@ class UnitreeG1Ah(UnitreeG1):
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        return {**self._motors_ft, **self._cameras_ft}
+        if self.controller is None:
+            return {**self._motors_ft, **self._cameras_ft}
+        keys = CLOSURE_ARM_MODE_STATE_KEYS if self._hand_closure else ARM_MODE_STATE_KEYS
+        return {**dict.fromkeys(keys, float), **self._cameras_ft}
 
     @cached_property
     def action_features(self) -> dict[str, type]:

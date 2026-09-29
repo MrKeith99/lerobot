@@ -36,6 +36,24 @@ GROOT_BASE_HEIGHT_RANGE = (0.50, 1.00)
 GROOT_BASE_HEIGHT_RATE = 0.05  # m/s
 
 
+# Absolute navigation command (vx, vy, yaw rate) consumed by the locomotion controllers, recorded as
+# an action in controller mode. Derived from the remote sticks as (ly, -lx, -rx).
+NAV_KEYS = ("kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd")
+
+
+def nav_from_remote(lx: float, ly: float, rx: float) -> dict[str, float]:
+    """Map remote stick axes to the navigation command, the mapping both controllers use."""
+    return dict(zip(NAV_KEYS, (float(ly), -float(lx), -float(rx)), strict=True))
+
+
+def nav_command(action: dict) -> tuple[float, float, float]:
+    """(vx, vy, yaw rate) from explicit NAV_KEYS if all are present, else from the remote sticks."""
+    if all(key in action for key in NAV_KEYS):
+        return tuple(float(action[key]) for key in NAV_KEYS)
+    lx, ly, rx, _ry = (action.get(k, 0.0) for k in REMOTE_AXES)
+    return tuple(nav_from_remote(lx, ly, rx).values())
+
+
 def default_remote_input() -> dict[str, float]:
     """Return a zeroed-out remote input dict (axes + buttons)."""
     return dict.fromkeys(REMOTE_KEYS, 0.0)

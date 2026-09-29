@@ -21,8 +21,8 @@ robot, with its extras appended:
 By default each hand is recorded as a single closure value instead of its 8 servos (see
 [Hand representation](#hand-representation)), giving 33 action/observation keys. With
 `--robot.hand_representation=per_motor` all 16 hand servos are recorded (47 keys). The first 29
-state columns, and with a locomotion controller the first 18 action columns, are identical to a
-stock `unitree_g1` dataset.
+columns are identical to a stock `unitree_g1` dataset. With a locomotion controller, legs and waist
+are not recorded (see [Optional: locomotion controller](#optional-locomotion-controller)).
 
 ### Body (29, SDK order)
 
@@ -97,8 +97,8 @@ files written with the earlier names (`xl330_joint`, `d455_joint`,
 
 | Value               | Hand keys                                    | No controller | With a locomotion controller |
 | ------------------- | -------------------------------------------- | ------------- | ---------------------------- |
-| `closure` (default) | `kLeftHand.closure`, `kRightHand.closure`    | 33 / 33       | 23 / 33                      |
-| `per_motor`         | the 16 `k{Left,Right}HandMotor{id}.q` servos | 47 / 47       | 37 / 47                      |
+| `closure` (default) | `kLeftHand.closure`, `kRightHand.closure`    | 33 / 33       | 22 / 18                      |
+| `per_motor`         | the 16 `k{Left,Right}HandMotor{id}.q` servos | 47 / 47       | 36 / 32                      |
 
 (Counts are `action` / `observation.state`.) Closure is a value in [0, 1]: 0 = open, 1 = closed.
 
@@ -364,9 +364,9 @@ chosen keys to fixed values instead.
 | D-pad up/down           | Head tilt (invert with `--teleop.invert_tilt=true`)                                            |
 | R1 (RB on Xbox)         | Hold to close the right hand (`kRightHand.closure` 0 → 1 at `hand_blend_per_s`, default 2.0/s) |
 | L1 (LB on Xbox)         | Hold to close the left hand                                                                    |
-| L2 / R2 (LT / RT)       | Hold to raise / lower the waist (`GrootLocomotionController` only)                             |
-| Left stick              | `remote.lx` / `remote.ly` (locomotion command, if a controller is attached)                    |
-| Right stick             | `remote.rx` / `remote.ry`                                                                      |
+| L2 / R2 (LT / RT)       | Hold to raise / lower the base height, `kBaseHeight.cmd` (`GrootLocomotionController` only)    |
+| Left stick              | Walk: `kNavVx.cmd` (forward) / `kNavVy.cmd` (sideways), if a controller is attached            |
+| Right stick (x)         | Turn: `kNavYawRate.cmd`                                                                        |
 | Triangle (Y on Xbox)    | End episode: success                                                                           |
 | Cross (A on Xbox)       | End episode: failure                                                                           |
 | Square (X on Xbox)      | End episode: rerecord                                                                          |
@@ -396,18 +396,26 @@ Disable it with `--robot.base_height_action=false`; the triggers then act only a
 `remote.button.0` / `remote.button.4`, the slots GR00T reads as R1 / R2 on the Unitree wireless
 remote (R1 itself is the hand button here). Both are 29dof-trained policies
 running on the 23dof UnitreeG1Ah body — GR00T's waist roll/pitch outputs land on slots the 23dof
-lacks and are dropped — **unverified on UnitreeG1Ah hardware**; use a gantry. Action features drop
-to the stock layout's 14 arm targets + `remote.lx/ly/rx/ry`, followed by head + hands, in this mode
-(the controller owns legs/waist): the 22-key `CLOSURE_ARM_MODE_ACTION_KEYS`, or the 36-key
-`ARM_MODE_ACTION_KEYS` with `hand_representation=per_motor`, plus `kBaseHeight.cmd` with GR00T
-(23 or 37 keys). `observation.state` keeps the full body (33 or 47 keys). For GR00T fine-tuning with
-relative actions on this layout, add `--policy.relative_action_pairing=name
---policy.relative_exclude_joints='["closure"]'`: arms and head become relative to their own measured
-state, and `remote.*`, `kBaseHeight.cmd` and the hand closures stay absolute (see [GR00T](./groot)).
+lacks and are dropped — **unverified on UnitreeG1Ah hardware**; use a gantry.
+
+In this mode the controller owns legs and waist, so they are not recorded, and locomotion is
+recorded as absolute commands (NVIDIA's GR00T G1 convention):
+
+- `observation.state` = arms (14) → head (2) → hands: `CLOSURE_ARM_MODE_STATE_KEYS` (18), or
+  `ARM_MODE_STATE_KEYS` (32) with `hand_representation=per_motor`.
+- `action` = the same columns → `kNavVx.cmd`, `kNavVy.cmd`, `kNavYawRate.cmd` → `kBaseHeight.cmd`
+  (GR00T only): 22 keys, or 36 with `per_motor`. The navigation command is the sticks as
+  `(ly, −lx, −rx)`, with the same range the controllers used before, and both controllers use it
+  directly.
+
+The state is a prefix of the action, so GR00T relative actions pair them by index. Name pairing
+also works: `--policy.relative_action_pairing=name --policy.relative_exclude_joints='["closure"]'`
+makes arms and head relative and keeps the closures and commands absolute (see [GR00T](./groot)).
+`get_observation()` still returns the full body; only the recorded features change.
 
 ## Teleoperate (keyboard)
 
-No gamepad on hand: `unitree_g1_ah_keyboard` emits the same 69-key action space, driven
+No gamepad on hand: `unitree_g1_ah_keyboard` emits the same 73-key action space, driven
 from a `pynput` keyboard listener instead of a joystick. It needs an X11 or Wayland
 session with `pynput` installed (`pip install 'lerobot[pynput-dep]'`); on a headless SSH
 session it logs a warning and produces no key input (see `docs/source/unitree_g1_ah.mdx`'s
@@ -432,10 +440,10 @@ lerobot-teleoperate \
 | Arrow up/down    | Head tilt (invert with `--teleop.invert_tilt=true`)                                            |
 | `e`              | Hold to close the right hand (`kRightHand.closure` 0 → 1 at `hand_blend_per_s`, default 2.0/s) |
 | `q`              | Hold to close the left hand                                                                    |
-| `w` / `s`        | `remote.ly` (locomotion command, if a controller is attached)                                  |
-| `a` / `d`        | `remote.lx`                                                                                    |
-| `i` / `k`        | `remote.ry`                                                                                    |
-| `j` / `l`        | `remote.rx`                                                                                    |
+| `w` / `s`        | Walk forward / back: `kNavVx.cmd` (if a controller is attached)                                |
+| `a` / `d`        | Walk left / right: `kNavVy.cmd`                                                                |
+| `i` / `k`        | `remote.ry` (unused by the controllers)                                                        |
+| `j` / `l`        | Turn: `kNavYawRate.cmd`                                                                        |
 | `y`              | End episode: success                                                                           |
 | `n`              | End episode: failure                                                                           |
 | `r`              | End episode: rerecord                                                                          |
@@ -469,15 +477,13 @@ lerobot-record \
 After recording, check `meta/info.json` in the dataset:
 
 - `"robot_type"` should read `"unitree_g1_23dof_ah8_d455_2dof_rev_1_0"` (or the `base` variant).
-- `features["observation.state"]["shape"]` should be `[33]` (`[47]` with
-  `hand_representation=per_motor`), with or without a locomotion controller.
-- `features["action"]["shape"]` should match it without a controller, and be `[23]` (`[37]` with
-  `per_motor`) with GR00T. That includes `kBaseHeight.cmd`; subtract 1 with
+- Without a controller: `observation.state` and `action` are both `[33]` (`[47]` with
+  `hand_representation=per_motor`), body (29) → head → left hand → right hand, matching
+  `CLOSURE_ACTION_KEYS` (`ALL_ACTION_KEYS`).
+- With a locomotion controller: `observation.state` is `[18]` (`[32]`), arms (14) → head → hands,
+  with no leg or waist joints; `action` is `[22]` (`[36]`), the state columns → `kNavVx.cmd`,
+  `kNavVy.cmd`, `kNavYawRate.cmd` → `kBaseHeight.cmd`. Subtract 1 with
   `--robot.base_height_action=false` or with Holosoma.
-- State names are in body (29) → head → left hand → right hand order, matching
-  `CLOSURE_ACTION_KEYS` (`ALL_ACTION_KEYS` for `per_motor`) in `g1_ah_joints.py`. With a
-  controller, `action` is arms (14) → remote axes → head → hands → `kBaseHeight.cmd`, matching
-  `CLOSURE_ARM_MODE_ACTION_KEYS` (`ARM_MODE_ACTION_KEYS`) plus the height.
 
 ---
 

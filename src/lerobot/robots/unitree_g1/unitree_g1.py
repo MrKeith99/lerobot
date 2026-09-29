@@ -34,7 +34,7 @@ from .config_unitree_g1 import UnitreeG1Config
 from .g1_kinematics import G1_29_ArmIK
 from .g1_utils import (
     BASE_HEIGHT_KEY,
-    REMOTE_AXES,
+    NAV_KEYS,
     REMOTE_KEYS,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
@@ -293,18 +293,21 @@ class UnitreeG1(Robot):
                 features[f"{cam}_depth"] = (cfg.height, cfg.width, 1)
         return features
 
+    @property
+    def _arm_ft(self) -> dict[str, type]:
+        return {f"{G1_29_JointArmIndex(motor).name}.q": float for motor in G1_29_JointArmIndex}
+
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        return {**self._motors_ft, **self._cameras_ft}
+        # With a locomotion controller the policy never commands legs/waist, so they are not recorded.
+        motors = self._motors_ft if self.controller is None else self._arm_ft
+        return {**motors, **self._cameras_ft}
 
     @cached_property
     def action_features(self) -> dict[str, type]:
         if self.controller is None:
             return {f"{G1_29_JointIndex(motor).name}.q": float for motor in G1_29_JointIndex}
-
-        arm_features = {f"{G1_29_JointArmIndex(motor).name}.q": float for motor in G1_29_JointArmIndex}
-        remote_features = dict.fromkeys(REMOTE_AXES, float)
-        return {**arm_features, **remote_features, **self._base_height_features}
+        return {**self._arm_ft, **dict.fromkeys(NAV_KEYS, float), **self._base_height_features}
 
     @property
     def _base_height_enabled(self) -> bool:
@@ -594,6 +597,9 @@ class UnitreeG1(Robot):
         """Update controller input state from incoming teleop action."""
         with self._controller_action_lock:
             for key in REMOTE_KEYS:
+                if key in action:
+                    self.controller_input[key] = action[key]
+            for key in NAV_KEYS:
                 if key in action:
                     self.controller_input[key] = action[key]
             if self._base_height_enabled and BASE_HEIGHT_KEY in action:

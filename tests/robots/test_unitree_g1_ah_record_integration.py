@@ -30,13 +30,16 @@ from lerobot.utils.import_utils import _unitree_sdk_available
 if not _unitree_sdk_available:
     pytest.skip("Unitree SDK not available", allow_module_level=True)
 
+from lerobot.robots.unitree_g1.g1_utils import NAV_KEYS
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
     ARM_KEYS,
     ARM_MODE_ACTION_KEYS,
+    ARM_MODE_STATE_KEYS,
     BODY_KEYS,
     CLOSURE_ACTION_KEYS,
     CLOSURE_ARM_MODE_ACTION_KEYS,
+    CLOSURE_ARM_MODE_STATE_KEYS,
     HAND_CLOSURE_KEYS,
     HEAD_HAND_MOTORS,
 )
@@ -121,7 +124,8 @@ class TestG1AhRecordLoopIntegration:
 
     @pytest.mark.parametrize("hand_representation", ["closure", "per_motor"])
     def test_controller_mode_record_loop(self, headhand_server, teleop, tmp_path, hand_representation):
-        state_keys, arm_mode_keys = _MODE_KEYS[hand_representation]
+        _, arm_mode_keys = _MODE_KEYS[hand_representation]
+        state_keys = CLOSURE_ARM_MODE_STATE_KEYS if hand_representation == "closure" else ARM_MODE_STATE_KEYS
         mocks = _make_sdk_mocks(mode_machine=4)
         controller = _make_stub_controller()
         patches, *_ = _make_g1ah(mocks, controller=controller)
@@ -154,6 +158,11 @@ class TestG1AhRecordLoopIntegration:
 
                     obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)
                     assert obs_frame["observation.state"].shape == (len(state_keys),)
+                    assert all(key in obs for key in BODY_KEYS)
+                    teleop_frame = build_dataset_frame(ds_features, action, ACTION)[ACTION]
+                    for key in NAV_KEYS:
+                        assert key in ds_features[ACTION]["names"]
+                        assert teleop_frame[ds_features[ACTION]["names"].index(key)] == pytest.approx(0.0)
             finally:
                 robot.disconnect()
 
@@ -218,8 +227,10 @@ class TestG1AhRecordLoopIntegration:
                 obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)["observation.state"]
                 act_names = ds_features[ACTION]["names"]
                 obs_names = ds_features["observation.state"]["names"]
-                for key in ARM_KEYS if controller else BODY_KEYS:
+                for key in obs_names:
                     assert act_frame[act_names.index(key)] == pytest.approx(obs_frame[obs_names.index(key)])
+                if controller:
+                    assert act_names[: len(obs_names)] == obs_names
                 assert any(abs(obs[key]) > 0.1 for key in ARM_KEYS)
             finally:
                 robot.disconnect()

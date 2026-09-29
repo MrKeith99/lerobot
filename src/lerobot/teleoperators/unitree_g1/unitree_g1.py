@@ -24,10 +24,12 @@ from lerobot.robots.unitree_g1.g1_utils import (
     GROOT_BASE_HEIGHT_DEFAULT,
     GROOT_BASE_HEIGHT_RANGE,
     GROOT_BASE_HEIGHT_RATE,
+    NAV_KEYS,
     REMOTE_AXES,
     REMOTE_BUTTONS,
     REMOTE_KEYS,
     G1_29_JointArmIndex,
+    nav_from_remote,
 )
 from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, TELEOPERATORS
 from lerobot.utils.import_utils import _unitree_sdk_available
@@ -223,6 +225,7 @@ class UnitreeG1Teleoperator(Teleoperator):
     def action_features(self) -> dict[str, type]:
         remote_features = {
             **dict.fromkeys(self.remote_controller.remote_action, float),
+            **dict.fromkeys(NAV_KEYS, float),
             BASE_HEIGHT_KEY: float,
         }
         if not self._arm_control_enabled:
@@ -309,7 +312,8 @@ class UnitreeG1Teleoperator(Teleoperator):
 
         rc._sync_remote_action()
         self._step_base_height()
-        return {**joint_action, **rc.remote_action, BASE_HEIGHT_KEY: self._base_height}
+        nav = nav_from_remote(rc.lx, rc.ly, rc.rx)
+        return {**joint_action, **rc.remote_action, **nav, BASE_HEIGHT_KEY: self._base_height}
 
     def _step_base_height(self) -> None:
         """Integrate R1 (raise) / R2 (lower) into the absolute GR00T base-height command."""

@@ -16,6 +16,7 @@
 
 """Tests for Unitree G1 robot. Meant to be run in an environment where the Unitree SDK is installed."""
 
+import contextlib
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -181,6 +182,12 @@ def _make_sdk_mocks():
 @pytest.fixture
 def unitree_g1():
     """Create a UnitreeG1 robot with all SDK dependencies mocked."""
+    with _mocked_unitree_g1() as (robot, mocks):
+        yield robot, mocks
+
+
+@contextlib.contextmanager
+def _mocked_unitree_g1(controller=None, **config_kwargs):
     mocks = _make_sdk_mocks()
 
     mock_channel_init = MagicMock()
@@ -224,14 +231,22 @@ def unitree_g1():
             "lerobot.robots.unitree_g1.unitree_g1.CRC",
             MagicMock(return_value=mocks["crc_mock"]),
         ),
+        patch(
+            "lerobot.robots.unitree_g1.unitree_g1.make_locomotion_controller",
+            return_value=MagicMock(control_dt=0.02) if controller else None,
+        ),
     ):
         from lerobot.robots.unitree_g1.unitree_g1 import UnitreeG1
 
-        cfg = UnitreeG1Config(is_simulation=True, gravity_compensation=False)
+        cfg = UnitreeG1Config(
+            is_simulation=True, gravity_compensation=False, controller=controller, **config_kwargs
+        )
         robot = UnitreeG1(cfg)
-        yield robot, mocks
-        if robot.is_connected:
-            robot.disconnect()
+        try:
+            yield robot, mocks
+        finally:
+            if robot.is_connected:
+                robot.disconnect()
 
 
 def test_init_state(unitree_g1):
@@ -256,6 +271,36 @@ def test_action_features_no_controller(unitree_g1):
     assert len(features) == 29
     for joint in G1_29_JointIndex:
         assert f"{joint.name}.q" in features
+
+
+_LOWER_BODY_KEYS = {f"{j.name}.q" for j in G1_29_JointIndex if j.value < 15}
+_ARM_KEYS = [f"{j.name}.q" for j in G1_29_JointIndex if j.value >= 15]
+_NAV = ["kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd"]
+
+
+@pytest.mark.parametrize(
+    "controller, config_kwargs, expected_extra",
+    [
+        ("GrootLocomotionController", {}, [*_NAV, "kBaseHeight.cmd"]),
+        ("GrootLocomotionController", {"base_height_action": False}, _NAV),
+        ("HolosomaLocomotionController", {}, _NAV),
+    ],
+)
+def test_controller_mode_features_drop_legs_and_waist(controller, config_kwargs, expected_extra):
+    with _mocked_unitree_g1(controller=controller, **config_kwargs) as (robot, _):
+        assert list(robot.observation_features) == _ARM_KEYS
+        assert list(robot.action_features) == _ARM_KEYS + expected_extra
+        assert not _LOWER_BODY_KEYS & set(robot.action_features)
+        assert not any(key.startswith("remote.") for key in robot.action_features)
+
+
+def test_controller_mode_forwards_nav_and_height_to_controller():
+    with _mocked_unitree_g1(controller="GrootLocomotionController") as (robot, _):
+        robot._update_controller_action(
+            {"kNavVx.cmd": 0.4, "kNavVy.cmd": -0.1, "kNavYawRate.cmd": 0.3, "kBaseHeight.cmd": 0.6}
+        )
+        assert [robot.controller_input[key] for key in _NAV] == [0.4, -0.1, 0.3]
+        assert robot.controller_input["kBaseHeight.cmd"] == 0.6
 
 
 def test_get_observation_before_connect(unitree_g1):

@@ -30,7 +30,7 @@ from .keyboard_input import UnitreeG1AhKeyboardInput
 
 
 class UnitreeG1AhKeyboardTeleop(UnitreeG1AhGamepadTeleop):
-    """Keyboard teleoperator emitting the full UnitreeG1Ah teleop action space (69 keys).
+    """Keyboard teleoperator emitting the full UnitreeG1Ah teleop action space (73 keys).
 
     The 16 `REMOTE_BUTTONS` are always zero here: no keys are bound to the waist triggers.
     """
@@ -45,7 +45,7 @@ class UnitreeG1AhKeyboardTeleop(UnitreeG1AhGamepadTeleop):
         print("UnitreeG1Ah keyboard controls:")
         print("  Arrow keys: head pan (left/right) / tilt (up/down)")
         print("  q / e: hold to close left / right hand")
-        print("  w/s, a/d: remote.ly / remote.lx (left stick)")
+        print("  w/s, a/d: forward / sideways (kNavVx / kNavVy, left stick)")
         print("  i/k, j/l: remote.ry / remote.rx (right stick)")
         print("  y / n / r: end episode success / failure / rerecord")
         print("  space: hold for intervention")

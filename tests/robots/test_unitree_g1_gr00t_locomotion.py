@@ -28,7 +28,9 @@ from lerobot.robots.unitree_g1.g1_utils import (  # noqa: E402
     GROOT_BASE_HEIGHT_DEFAULT,
     GROOT_BASE_HEIGHT_RANGE,
     GROOT_BASE_HEIGHT_RATE,
+    NAV_KEYS,
     default_remote_input,
+    nav_from_remote,
 )
 from lerobot.robots.unitree_g1.gr00t_locomotion import CONTROL_DT, GrootLocomotionController  # noqa: E402
 
@@ -97,3 +99,25 @@ def test_reset_restores_default_height(controller):
     controller.run_step({**default_remote_input(), BASE_HEIGHT_KEY: 0.55}, _lowstate())
     controller.reset()
     assert controller.groot_height_cmd == pytest.approx(GROOT_BASE_HEIGHT_DEFAULT)
+
+
+def test_nav_command_sets_velocity_command(controller):
+    action = {**default_remote_input(), **dict(zip(NAV_KEYS, (0.4, -0.1, 0.3), strict=True))}
+    controller.run_step(action, _lowstate())
+    np.testing.assert_allclose(controller.cmd, [0.4, -0.1, 0.3], rtol=1e-6)
+
+
+def test_nav_command_matches_remote_axes_mapping(controller):
+    remote = {**default_remote_input(), "remote.lx": 0.3, "remote.ly": 0.7, "remote.rx": -0.5}
+    controller.run_step(remote, _lowstate())
+    from_remote = controller.cmd.copy()
+    nav = {**default_remote_input(), **nav_from_remote(0.3, 0.7, -0.5)}
+    controller.run_step(nav, _lowstate())
+    np.testing.assert_allclose(controller.cmd, from_remote)
+    np.testing.assert_allclose(from_remote, [0.7, -0.3, 0.5], rtol=1e-6)
+
+
+def test_nav_command_takes_precedence_over_remote_axes(controller):
+    action = {**default_remote_input(), "remote.ly": 1.0, **dict.fromkeys(NAV_KEYS, 0.0)}
+    controller.run_step(action, _lowstate())
+    np.testing.assert_allclose(controller.cmd, [0.0, 0.0, 0.0])

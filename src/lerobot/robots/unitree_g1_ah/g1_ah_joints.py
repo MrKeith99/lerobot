@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 from lerobot.robots.unitree_g1.g1_utils import (
     BASE_HEIGHT_KEY,
-    REMOTE_AXES,
+    NAV_KEYS,
     REMOTE_KEYS,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
@@ -123,7 +123,10 @@ LEFT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_names
 RIGHT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_names("right"))
 HAND_KEYS: tuple[str, ...] = LEFT_HAND_KEYS + RIGHT_HAND_KEYS
 ALL_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + LEFT_HAND_KEYS + RIGHT_HAND_KEYS
-ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + REMOTE_AXES + HEAD_KEYS + HAND_KEYS
+# Controller mode (legs/waist driven by a locomotion controller): the state omits legs/waist and the
+# action is the state followed by the navigation command (kBaseHeight.cmd is appended by the robot).
+ARM_MODE_STATE_KEYS: tuple[str, ...] = ARM_KEYS + HEAD_KEYS + HAND_KEYS
+ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_MODE_STATE_KEYS + NAV_KEYS
 HAND_REPRESENTATIONS: tuple[str, ...] = ("closure", "per_motor")
 
 
@@ -136,8 +139,11 @@ def hand_closure_key(side: str) -> str:
 
 HAND_CLOSURE_KEYS: tuple[str, ...] = tuple(hand_closure_key(side) for side in HAND_SIDES)
 CLOSURE_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + HAND_CLOSURE_KEYS
-CLOSURE_ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + REMOTE_AXES + HEAD_KEYS + HAND_CLOSURE_KEYS
-TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + HAND_CLOSURE_KEYS + REMOTE_KEYS + (BASE_HEIGHT_KEY,)
+CLOSURE_ARM_MODE_STATE_KEYS: tuple[str, ...] = ARM_KEYS + HEAD_KEYS + HAND_CLOSURE_KEYS
+CLOSURE_ARM_MODE_ACTION_KEYS: tuple[str, ...] = CLOSURE_ARM_MODE_STATE_KEYS + NAV_KEYS
+TELEOP_ACTION_KEYS: tuple[str, ...] = (
+    ALL_ACTION_KEYS + HAND_CLOSURE_KEYS + REMOTE_KEYS + NAV_KEYS + (BASE_HEIGHT_KEY,)
+)
 INVALID_BODY_KEYS: tuple[str, ...] = tuple(
     f"{joint.name}.q" for joint in G1_29_JointIndex if joint in G1_23_INVALID_SDK_SLOTS
 )

@@ -25,7 +25,7 @@ from lerobot.utils.import_utils import _unitree_sdk_available
 if not _unitree_sdk_available:
     pytest.skip("Unitree SDK not available", allow_module_level=True)
 
-from lerobot.robots.unitree_g1.g1_utils import BASE_HEIGHT_KEY, REMOTE_BUTTONS, REMOTE_KEYS
+from lerobot.robots.unitree_g1.g1_utils import BASE_HEIGHT_KEY, NAV_KEYS, REMOTE_BUTTONS, REMOTE_KEYS
 from lerobot.teleoperators.unitree_g1.config_unitree_g1 import (
     ExoskeletonArmPortConfig,
     UnitreeG1TeleoperatorConfig,
@@ -216,7 +216,7 @@ def test_remote_only_action_features(teleop_remote_only):
     teleop = teleop_remote_only
     features = teleop.action_features
     # Remote-only: the 4 remote axes + 16 remote buttons
-    assert set(features.keys()) == set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
+    assert set(features.keys()) == set(REMOTE_KEYS) | set(NAV_KEYS) | {BASE_HEIGHT_KEY}
 
 
 def test_feedback_features(teleop_remote_only):
@@ -230,7 +230,7 @@ def test_remote_only_get_action(teleop_remote_only):
     teleop = teleop_remote_only
     teleop.connect()
     action = teleop.get_action()
-    assert set(action.keys()) == set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
+    assert set(action.keys()) == set(REMOTE_KEYS) | set(NAV_KEYS) | {BASE_HEIGHT_KEY}
     assert all(isinstance(v, float) for v in action.values())
 
 
@@ -257,7 +257,7 @@ def test_remote_only_holds_first_observed_arm_pose(teleop_remote_only):
     teleop.send_feedback(dict.fromkeys(arm_keys, -1.0))
 
     action = teleop.get_action()
-    assert set(action.keys()) == set(arm_keys) | set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
+    assert set(action.keys()) == set(arm_keys) | set(REMOTE_KEYS) | set(NAV_KEYS) | {BASE_HEIGHT_KEY}
     assert {key: action[key] for key in arm_keys} == pytest.approx(first_pose)
 
 
@@ -265,7 +265,7 @@ def test_remote_only_ignores_partial_arm_feedback(teleop_remote_only):
     teleop = teleop_remote_only
     teleop.connect()
     teleop.send_feedback({"kLeftShoulderPitch.q": 0.5})
-    assert set(teleop.get_action().keys()) == set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
+    assert set(teleop.get_action().keys()) == set(REMOTE_KEYS) | set(NAV_KEYS) | {BASE_HEIGHT_KEY}
 
 
 @pytest.mark.parametrize("button, sign", [(0, 1.0), (4, -1.0)])
@@ -298,6 +298,16 @@ def test_base_height_is_clipped(teleop_remote_only):
             clock["t"] += 0.1
             action = teleop.get_action()
     assert action[BASE_HEIGHT_KEY] == pytest.approx(GROOT_BASE_HEIGHT_RANGE[0])
+
+
+def test_remote_sticks_emit_nav_command(teleop_remote_only):
+    teleop = teleop_remote_only
+    teleop.connect()
+    rc = teleop.remote_controller
+    rc.lx, rc.ly, rc.rx, rc.ry = 0.2, 0.8, -0.5, 0.3
+    action = teleop.get_action()
+    assert [action[key] for key in NAV_KEYS] == pytest.approx([0.8, -0.2, 0.5])
+    assert action["remote.ly"] == pytest.approx(0.8)
 
 
 def test_asymmetric_exo_ports_raises():

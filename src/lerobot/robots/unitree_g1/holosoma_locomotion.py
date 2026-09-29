@@ -23,10 +23,10 @@ import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 
 from .g1_utils import (
-    REMOTE_AXES,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
     get_gravity_orientation,
+    nav_command,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,13 +142,8 @@ class HolosomaLocomotionController:
         if lowstate is None:
             return {}
 
-        lx, ly, rx, _ry = (action.get(k, 0.0) for k in REMOTE_AXES)
-        ly = ly if abs(ly) > 0.1 else 0.0
-        lx = lx if abs(lx) > 0.1 else 0.0
-        rx = rx if abs(rx) > 0.1 else 0.0
-        ly = np.clip(ly, -0.3, 0.3)
-        lx = np.clip(lx, -0.3, 0.3)
-        self.cmd[:] = [ly, -lx, -rx]
+        vx, vy, yaw = (value if abs(value) > 0.1 else 0.0 for value in nav_command(action))
+        self.cmd[:] = [np.clip(vx, -0.3, 0.3), np.clip(vy, -0.3, 0.3), yaw]
 
         # Get joint positions and velocities from lowstate
         for motor in G1_29_JointIndex:

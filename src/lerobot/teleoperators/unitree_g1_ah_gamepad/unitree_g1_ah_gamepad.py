@@ -19,7 +19,8 @@
 Emits every key in `TELEOP_ACTION_KEYS` on every `get_action()` call: held body/hand
 poses (taken from the robot's first observation via `send_feedback`, else `default_action()`),
 D-pad-driven head targets, an RB/LB-blended hand open/close (per-servo targets plus
-`k{Side}Hand.closure` in [0, 1]), the 4 `REMOTE_AXES` driven by the sticks and the 16
+`k{Side}Hand.closure` in [0, 1]), the 4 `REMOTE_AXES` driven by the sticks (also emitted as the
+`kNavVx/Vy/YawRate.cmd` navigation command) and the 16
 `REMOTE_BUTTONS`, of which the L2/R2 triggers drive the locomotion controller's waist
 raise/lower slots. All motion is time-based (rad/s, blend/s) so behaviour does not depend on
 the calling loop's fps.
@@ -39,6 +40,7 @@ from lerobot.robots.unitree_g1.g1_utils import (
     GROOT_BASE_HEIGHT_RATE,
     REMOTE_AXES,
     REMOTE_BUTTONS,
+    nav_from_remote,
 )
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
@@ -73,7 +75,7 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 
 class UnitreeG1AhGamepadTeleop(Teleoperator):
-    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (69 keys)."""
+    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (73 keys)."""
 
     config_class = UnitreeG1AhGamepadTeleopConfig
     name = "unitree_g1_ah_gamepad"
@@ -127,7 +129,7 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         print("  D-pad: head pan (left/right) / tilt (up/down)")
         print(f"  {rb_lb}: hold to close right / left hand")
         print(f"  {lt_rt}: hold to raise / lower waist (GrootLocomotionController)")
-        print("  Sticks: locomotion command (remote.lx/ly/rx/ry)")
+        print("  Sticks: navigation command (kNavVx/Vy/YawRate.cmd, from remote.lx/ly/rx)")
         print(f"  {yax}: end episode success / failure / rerecord")
 
     @property
@@ -234,7 +236,9 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         self._step_hands(dt)
         self._step_base_height(dt)
 
-        return {**self._target, **self._remote_axes(), **self._remote_buttons()}
+        remote_axes = self._remote_axes()
+        nav = nav_from_remote(remote_axes["remote.lx"], remote_axes["remote.ly"], remote_axes["remote.rx"])
+        return {**self._target, **remote_axes, **nav, **self._remote_buttons()}
 
     def get_teleop_events(self) -> dict[str, Any]:
         if self.gamepad is None:

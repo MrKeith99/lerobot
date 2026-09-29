@@ -208,7 +208,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 70
+    assert len(teleop.action_features) == 73
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -275,6 +275,7 @@ def test_w_gives_positive_remote_ly(teleop):
     teleop.gamepad.press("w")
     action = teleop.get_action()
     assert action["remote.ly"] > 0.0
+    assert action["kNavVx.cmd"] == pytest.approx(action["remote.ly"])
 
 
 def test_emit_remote_axes_false_zeros_out():

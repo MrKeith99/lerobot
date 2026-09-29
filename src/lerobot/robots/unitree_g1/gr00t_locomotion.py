@@ -26,10 +26,10 @@ from .g1_utils import (
     GROOT_BASE_HEIGHT_DEFAULT,
     GROOT_BASE_HEIGHT_RANGE,
     GROOT_BASE_HEIGHT_RATE,
-    REMOTE_AXES,
     REMOTE_BUTTONS,
     G1_29_JointIndex,
     get_gravity_orientation,
+    nav_command,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,10 +145,7 @@ class GrootLocomotionController:
             if buttons[4]:  # R2 - lower waist
                 self.groot_height_cmd = float(np.clip(self.groot_height_cmd - step, *GROOT_BASE_HEIGHT_RANGE))
 
-        lx, ly, rx, _ry = (action.get(k, 0.0) for k in REMOTE_AXES)
-        self.cmd[0] = ly  # Forward/backward
-        self.cmd[1] = -lx  # Left/right (negated)
-        self.cmd[2] = -rx  # Rotation rate (negated)
+        self.cmd[:] = nav_command(action)  # vx, vy, yaw rate
 
         # Get joint positions and velocities from lowstate
         for motor in G1_29_JointIndex:
