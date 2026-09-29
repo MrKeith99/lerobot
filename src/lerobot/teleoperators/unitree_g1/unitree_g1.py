@@ -206,6 +206,7 @@ class UnitreeG1Teleoperator(Teleoperator):
 
         self.ik_helper: ExoskeletonIKHelper | None = None
         self.remote_controller = RemoteController()
+        self._held_arm_action: dict[str, float] | None = None
 
     @cached_property
     def action_features(self) -> dict[str, type]:
@@ -280,6 +281,8 @@ class UnitreeG1Teleoperator(Teleoperator):
             left_angles = self.left_arm.get_angles()
             right_angles = self.right_arm.get_angles()
             joint_action = self.ik_helper.compute_g1_joints_from_exo(left_angles, right_angles)
+        elif self._held_arm_action is not None:
+            joint_action = dict(self._held_arm_action)
 
         # Wireless remote has priority when non-zero; otherwise, use exo joystick.
         rc = self.remote_controller
@@ -297,6 +300,11 @@ class UnitreeG1Teleoperator(Teleoperator):
         wireless_remote = feedback.get("wireless_remote")
         if wireless_remote is not None:
             self.remote_controller.set_from_wireless(wireless_remote)
+        if not self._arm_control_enabled and self._held_arm_action is None:
+            arm_keys = [f"{name}.q" for name in self._g1_arm_joint_names]
+            if all(key in feedback for key in arm_keys):
+                # Hold the first observed arm pose so recorded actions keep the robot's arm keys.
+                self._held_arm_action = {key: float(feedback[key]) for key in arm_keys}
 
     def disconnect(self) -> None:
         self.left_arm.disconnect()

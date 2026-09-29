@@ -248,6 +248,26 @@ def test_send_feedback_missing_key(teleop_remote_only):
     teleop.send_feedback({"other_key": 42})
 
 
+def test_remote_only_holds_first_observed_arm_pose(teleop_remote_only):
+    teleop = teleop_remote_only
+    teleop.connect()
+    arm_keys = [f"{name}.q" for name in teleop._g1_arm_joint_names]
+    first_pose = {key: 0.1 * i for i, key in enumerate(arm_keys)}
+    teleop.send_feedback(first_pose)
+    teleop.send_feedback(dict.fromkeys(arm_keys, -1.0))
+
+    action = teleop.get_action()
+    assert set(action.keys()) == set(arm_keys) | set(REMOTE_KEYS)
+    assert {key: action[key] for key in arm_keys} == pytest.approx(first_pose)
+
+
+def test_remote_only_ignores_partial_arm_feedback(teleop_remote_only):
+    teleop = teleop_remote_only
+    teleop.connect()
+    teleop.send_feedback({"kLeftShoulderPitch.q": 0.5})
+    assert set(teleop.get_action().keys()) == set(REMOTE_KEYS)
+
+
 def test_asymmetric_exo_ports_raises():
     """Configuring only one exo port should raise ValueError."""
     cfg = UnitreeG1TeleoperatorConfig(
