@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES
+from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import TELEOP_ACTION_KEYS, default_action, hand_pose_rad
 from lerobot.teleoperators.unitree_g1_ah_gamepad import (
     UnitreeG1AhGamepadTeleop,
@@ -93,7 +93,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 45
+    assert len(teleop.action_features) == 61
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -106,8 +106,34 @@ def test_idle_action_matches_default_and_zero_remote(teleop):
     default = default_action()
     for key, value in default.items():
         assert action[key] == pytest.approx(value)
-    for key in REMOTE_AXES:
+    for key in REMOTE_KEYS:
         assert action[key] == pytest.approx(0.0)
+
+
+def test_triggers_drive_waist_buttons_not_hands(teleop):
+    layout = teleop.config.layout
+    default = default_action()
+
+    teleop.gamepad.axes[layout.trigger_left] = 1.0
+    action = teleop.get_action()
+    assert action["remote.button.0"] == 1.0
+    assert action["remote.button.4"] == 0.0
+    for key in default:
+        if "hand" in key:
+            assert action[key] == pytest.approx(default[key])
+
+    teleop.gamepad.axes[layout.trigger_left] = -1.0
+    teleop.gamepad.axes[layout.trigger_right] = 1.0
+    action = teleop.get_action()
+    assert action["remote.button.0"] == 0.0
+    assert action["remote.button.4"] == 1.0
+
+    teleop.gamepad.axes[layout.trigger_right] = -1.0
+    teleop.gamepad.buttons.add(layout.button_rb)
+    teleop.gamepad.buttons.add(layout.button_lb)
+    action = teleop.get_action()
+    for key in REMOTE_BUTTONS:
+        assert action[key] == 0.0
 
 
 def test_hat_up_tilts_and_saturates(teleop):
@@ -300,6 +326,7 @@ def test_default_config_uses_dualshock4_hidapi_preset():
     assert cfg.layout.button_rb == 10
     assert cfg.layout.hat is None
     assert cfg.layout.dpad_up == 11
+    assert (cfg.layout.trigger_left, cfg.layout.trigger_right) == (4, 5)
 
 
 def test_xbox_preset_gives_expected_layout():
@@ -307,12 +334,14 @@ def test_xbox_preset_gives_expected_layout():
     assert cfg.layout.button_rb == 5
     assert cfg.layout.hat == 0
     assert cfg.layout.dpad_up is None
+    assert (cfg.layout.trigger_left, cfg.layout.trigger_right) == (2, 5)
 
 
 def test_dualshock4_kernel_preset_gives_expected_layout():
     cfg = UnitreeG1AhGamepadTeleopConfig(preset="dualshock4_kernel")
     assert cfg.layout.button_rb == 5
     assert cfg.layout.button_y == 2
+    assert (cfg.layout.trigger_left, cfg.layout.trigger_right) == (2, 5)
 
 
 def test_explicit_layout_override_preserved_with_default_preset():

@@ -29,12 +29,16 @@ class GamepadLayout:
 
     `dpad_up`/`dpad_down`/`dpad_left`/`dpad_right` are optional D-pad-as-buttons indices,
     used instead of `hat` when set (SDL's HIDAPI PS4 driver reports no hat).
+    `trigger_left`/`trigger_right` are the L2/R2 (LT/RT) axis indices; a trigger counts as
+    pressed while its axis reads > 0.
     """
 
     left_x: int = 0
     left_y: int = 1
     right_x: int = 2
     right_y: int = 3
+    trigger_left: int = 4
+    trigger_right: int = 5
     button_a: int = 0
     button_b: int = 1
     button_x: int = 2
@@ -57,6 +61,8 @@ class GamepadLayout:
             left_y=1,
             right_x=2,
             right_y=3,
+            trigger_left=4,
+            trigger_right=5,
             button_a=0,
             button_b=1,
             button_x=2,
@@ -80,6 +86,8 @@ class GamepadLayout:
             left_y=1,
             right_x=3,
             right_y=4,
+            trigger_left=2,
+            trigger_right=5,
             button_a=0,
             button_b=1,
             button_x=3,
@@ -103,6 +111,8 @@ class GamepadLayout:
             left_y=1,
             right_x=3,
             right_y=4,
+            trigger_left=2,
+            trigger_right=5,
             button_a=0,
             button_b=1,
             button_x=2,
@@ -135,8 +145,10 @@ class UnitreeG1AhGamepadTeleopConfig(TeleoperatorConfig):
     """Hardware-light gamepad teleoperator for the UnitreeG1Ah robot.
 
     Emits every key in `TELEOP_ACTION_KEYS`: held body/hand poses, D-pad-driven
-    head targets, an R1/L1 (RB/LB on Xbox)-blended hand open/close, and the 4
-    `REMOTE_AXES` driven by the sticks (zeros when `emit_remote_axes` is False).
+    head targets, an R1/L1 (RB/LB on Xbox)-blended hand open/close, the 4
+    `REMOTE_AXES` driven by the sticks (zeros when `emit_remote_axes` is False), and
+    the 16 `REMOTE_BUTTONS`, of which L2/R2 (LT/RT) drive the locomotion controller's
+    waist raise/lower slots (`remote.button.0`/`remote.button.4`).
     """
 
     layout: GamepadLayout = field(default_factory=GamepadLayout)

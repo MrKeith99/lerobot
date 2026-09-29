@@ -301,6 +301,7 @@ lerobot-teleoperate \
 | D-pad up/down           | Head tilt (invert with `--teleop.invert_tilt=true`)                         |
 | R1 (RB on Xbox)         | Hold to close the right hand (blend rate `hand_blend_per_s`, default 2.0/s) |
 | L1 (LB on Xbox)         | Hold to close the left hand                                                 |
+| L2 / R2 (LT / RT)       | Hold to raise / lower the waist (`GrootLocomotionController` only)          |
 | Left stick              | `remote.lx` / `remote.ly` (locomotion command, if a controller is attached) |
 | Right stick             | `remote.rx` / `remote.ry`                                                   |
 | Triangle (Y on Xbox)    | End episode: success                                                        |
@@ -323,15 +324,19 @@ python -m lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input --seconds 30
 
 ### Optional: locomotion controller
 
-Pass `--robot.controller=HolosomaLocomotionController` to drive the legs with a learned
-locomotion policy while the gamepad controls arms/head/hands. This runs a 29dof-trained
-policy on the 23dof UnitreeG1Ah body — **unverified on UnitreeG1Ah hardware**; use a gantry. Action
-features drop to the 32-key `ARM_MODE_ACTION_KEYS` set in this mode (arms + head + hands +
-remote axes; the controller owns legs/waist).
+Pass `--robot.controller=HolosomaLocomotionController` or `--robot.controller=GrootLocomotionController`
+to drive the legs with a learned locomotion policy while the gamepad controls arms/head/hands.
+With GR00T, holding L2 / R2 raises / lowers the commanded base height (0.50–1.00 m); the teleop
+forwards the triggers as `remote.button.0` / `remote.button.4`, the slots GR00T reads as R1 / R2 on
+the Unitree wireless remote (R1 itself is the hand button here). Both are 29dof-trained policies
+running on the 23dof UnitreeG1Ah body — GR00T's waist roll/pitch outputs land on slots the 23dof
+lacks and are dropped — **unverified on UnitreeG1Ah hardware**; use a gantry. Action features drop
+to the 32-key `ARM_MODE_ACTION_KEYS` set in this mode (arms + head + hands + remote axes; the
+controller owns legs/waist).
 
 ## Teleoperate (keyboard)
 
-No gamepad on hand: `unitree_g1_ah_keyboard` emits the same 45-key action space, driven
+No gamepad on hand: `unitree_g1_ah_keyboard` emits the same 61-key action space, driven
 from a `pynput` keyboard listener instead of a joystick. It needs an X11 or Wayland
 session with `pynput` installed (`pip install 'lerobot[pynput-dep]'`); on a headless SSH
 session it logs a warning and produces no key input (see `docs/source/unitree_g1_ah.mdx`'s

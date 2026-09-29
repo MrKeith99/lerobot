@@ -17,9 +17,10 @@
 """Hardware-light gamepad teleoperator for the UnitreeG1Ah robot.
 
 Emits every key in `TELEOP_ACTION_KEYS` on every `get_action()` call: held body/hand
-poses, D-pad-driven head targets, an RB/LB-blended hand open/close, and the 4
-`REMOTE_AXES` driven by the sticks. All motion is time-based (rad/s, blend/s) so
-behaviour does not depend on the calling loop's fps.
+poses, D-pad-driven head targets, an RB/LB-blended hand open/close, the 4
+`REMOTE_AXES` driven by the sticks and the 16 `REMOTE_BUTTONS`, of which the L2/R2
+triggers drive the locomotion controller's waist raise/lower slots. All motion is
+time-based (rad/s, blend/s) so behaviour does not depend on the calling loop's fps.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from functools import cached_property
 from typing import Any
 
 from lerobot.lerobot_types import RobotAction
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES
+from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
     HEAD_LIMITS_RAD,
@@ -46,6 +47,10 @@ from .config_unitree_g1_ah_gamepad import UnitreeG1AhGamepadTeleopConfig
 from .gamepad_input import UnitreeG1AhGamepadInput
 
 _DT_CAP_S = 0.1
+# GrootLocomotionController reads waist raise/lower from remote.button.0/4 (the wireless
+# remote's R1/R2 slots); R1 is the hand button here, so L2 stands in for the raise slot.
+_WAIST_RAISE_KEY = "remote.button.0"
+_WAIST_LOWER_KEY = "remote.button.4"
 
 
 def _lerp(a: float, b: float, t: float) -> float:
@@ -53,7 +58,7 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 
 class UnitreeG1AhGamepadTeleop(Teleoperator):
-    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (45 keys)."""
+    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (61 keys)."""
 
     config_class = UnitreeG1AhGamepadTeleopConfig
     name = "unitree_g1_ah_gamepad"
@@ -88,12 +93,13 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         self.gamepad.start()
         self._last_t = None
         if self.config.preset == "xbox":
-            rb_lb, yax = "RB / LB", "Y / A / X"
+            rb_lb, lt_rt, yax = "RB / LB", "LT / RT", "Y / A / X"
         else:
-            rb_lb, yax = "R1 / L1", "Triangle / Cross / Square"
+            rb_lb, lt_rt, yax = "R1 / L1", "L2 / R2", "Triangle / Cross / Square"
         print(f"UnitreeG1Ah gamepad controls ({self.config.preset}):")
         print("  D-pad: head pan (left/right) / tilt (up/down)")
         print(f"  {rb_lb}: hold to close right / left hand")
+        print(f"  {lt_rt}: hold to raise / lower waist (GrootLocomotionController)")
         print("  Sticks: locomotion command (remote.lx/ly/rx/ry)")
         print(f"  {yax}: end episode success / failure / rerecord")
 
@@ -153,6 +159,13 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
             "remote.ry": -self.gamepad.axis(layout.right_y),
         }
 
+    def _remote_buttons(self) -> dict[str, float]:
+        layout = self.config.layout
+        buttons = dict.fromkeys(REMOTE_BUTTONS, 0.0)
+        buttons[_WAIST_RAISE_KEY] = float(self.gamepad.axis(layout.trigger_left) > 0.0)
+        buttons[_WAIST_LOWER_KEY] = float(self.gamepad.axis(layout.trigger_right) > 0.0)
+        return buttons
+
     @check_if_not_connected
     def get_action(self) -> RobotAction:
         now = time.perf_counter()
@@ -162,9 +175,8 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         self.gamepad.update()
         self._step_head(dt)
         self._step_hands(dt)
-        remote = self._remote_axes()
 
-        return {**self._target, **remote}
+        return {**self._target, **self._remote_axes(), **self._remote_buttons()}
 
     def get_teleop_events(self) -> dict[str, Any]:
         if self.gamepad is None:

@@ -30,7 +30,7 @@ def test_key_counts():
     assert len(j.HAND_KEYS) == 16
     assert len(j.ALL_ACTION_KEYS) == 41
     assert len(j.ARM_MODE_ACTION_KEYS) == 32
-    assert len(j.TELEOP_ACTION_KEYS) == 45
+    assert len(j.TELEOP_ACTION_KEYS) == 61
     assert len(j.HEAD_HAND_KEYS) == 18
 
 
@@ -106,7 +106,7 @@ def test_head_hand_motors_unique_names_and_ids():
 def test_keys_have_no_slash_and_end_with_q_except_remote():
     for key in j.TELEOP_ACTION_KEYS:
         assert "/" not in key
-        if key not in j.REMOTE_AXES:
+        if key not in j.REMOTE_KEYS:
             assert key.endswith(".q")
 
 

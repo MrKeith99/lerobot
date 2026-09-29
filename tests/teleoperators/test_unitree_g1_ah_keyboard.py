@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES
+from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_KEYS
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import TELEOP_ACTION_KEYS, default_action, hand_pose_rad
 from lerobot.teleoperators.unitree_g1_ah_keyboard import (
     UnitreeG1AhKeyboardTeleop,
@@ -190,7 +190,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 45
+    assert len(teleop.action_features) == 61
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -203,7 +203,7 @@ def test_idle_action_matches_default_and_zero_remote(teleop):
     default = default_action()
     for key, value in default.items():
         assert action[key] == pytest.approx(value)
-    for key in REMOTE_AXES:
+    for key in REMOTE_KEYS:
         assert action[key] == pytest.approx(0.0)
 
 

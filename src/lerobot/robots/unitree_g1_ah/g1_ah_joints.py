@@ -27,7 +27,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, G1_29_JointArmIndex, G1_29_JointIndex
+from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_KEYS, G1_29_JointArmIndex, G1_29_JointIndex
 
 ROBOT_TYPE_BASE = "unitree_g1_23dof_ah8_d455_2dof"
 ROBOT_TYPE_REV_1_0 = ROBOT_TYPE_BASE + "_rev_1_0"
@@ -101,7 +101,7 @@ RIGHT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_name
 HAND_KEYS: tuple[str, ...] = LEFT_HAND_KEYS + RIGHT_HAND_KEYS
 ALL_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + LEFT_HAND_KEYS + RIGHT_HAND_KEYS
 ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + HEAD_KEYS + HAND_KEYS + REMOTE_AXES
-TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + REMOTE_AXES
+TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + REMOTE_KEYS
 INVALID_BODY_KEYS: tuple[str, ...] = tuple(
     f"{joint.name}.q" for joint in G1_29_JointIndex if joint in G1_23_INVALID_SDK_SLOTS
 )
