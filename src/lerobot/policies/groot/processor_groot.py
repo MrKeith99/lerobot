@@ -1044,9 +1044,12 @@ def _infer_n1_7_action_groups(
         is_excluded = any(token == lowered or token in lowered for token in exclude_tokens)
         if is_excluded:
             flush_relative_group()
-            groups.append(
-                _GrootN17ActionGroup(key=_feature_group_key(str(name)), indices=[index], relative=False)
-            )
+            key = _feature_group_key(str(name))
+            # Keys index the grouped stats, so two absolute features sharing a suffix (e.g.
+            # kLeftHand.closure / kRightHand.closure) must not collapse onto one entry.
+            if any(group.key == key for group in groups):
+                key = str(name).replace(".", "_").replace(" ", "_")
+            groups.append(_GrootN17ActionGroup(key=key, indices=[index], relative=False))
         else:
             current_indices.append(index)
 

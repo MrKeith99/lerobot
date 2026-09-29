@@ -30,6 +30,7 @@ from lerobot.policies.groot.processor_groot import (
     GrootN17ActionDecodeStep,
     GrootN17PackInputsStep,
     GrootReorderStateStep,
+    _infer_n1_7_action_groups,
     _name_pairing_plan,
     make_groot_pre_post_processors,
 )
@@ -88,6 +89,14 @@ def test_name_pairing_plan_matches_index_pairing_for_aligned_layouts():
 def test_name_pairing_plan_errors(action_names, state_names, message):
     with pytest.raises(ValueError, match=message):
         _name_pairing_plan(action_names, state_names, [])
+
+
+def test_absolute_features_sharing_a_suffix_get_distinct_group_keys():
+    names = ["kLeftShoulderPitch.q", "kLeftHand.closure", "kRightHand.closure", "gripper.pos"]
+    groups = _infer_n1_7_action_groups(names, action_dim=4, exclude_joints=["closure", "gripper"])
+    keys = [group.key for group in groups]
+    assert keys == ["single_arm", "closure", "kRightHand_closure", "gripper"]
+    assert len(set(keys)) == len(keys)
 
 
 def test_reorder_state_step_applies_and_round_trips(tmp_path):
