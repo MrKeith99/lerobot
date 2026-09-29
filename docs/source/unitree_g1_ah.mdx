@@ -10,41 +10,55 @@ DDS/network basics.
 
 ## Hardware & Joint Layout
 
-UnitreeG1Ah drives 41 joints in a fixed order: 23 body joints (Unitree G1 SDK order, with 6
-unused SDK slots dropped), 2 head joints, then 8 left-hand and 8 right-hand servos. By default
-each hand is recorded as a single closure value instead of its 8 servos (see
-[Hand representation](#hand-representation)), giving 27 action/observation keys; with
-`--robot.hand_representation=per_motor` all 41 joints are recorded.
+UnitreeG1Ah records its joints in the same layout as the stock [Unitree G1](./unitree_g1)
+robot, with its extras appended:
 
-### Body (23, SDK order)
+- the full 29-slot Unitree SDK body, where the 6 slots that don't exist on this 23dof hardware
+  are always recorded as 0.0 (see [Unused SDK slots](#unused-sdk-slots));
+- then the 2 head joints;
+- then the hands.
 
-| #   | SDK slot | Lerobot key             |
-| --- | -------- | ----------------------- |
-| 0   | 0        | `kLeftHipPitch.q`       |
-| 1   | 1        | `kLeftHipRoll.q`        |
-| 2   | 2        | `kLeftHipYaw.q`         |
-| 3   | 3        | `kLeftKnee.q`           |
-| 4   | 4        | `kLeftAnklePitch.q`     |
-| 5   | 5        | `kLeftAnkleRoll.q`      |
-| 6   | 6        | `kRightHipPitch.q`      |
-| 7   | 7        | `kRightHipRoll.q`       |
-| 8   | 8        | `kRightHipYaw.q`        |
-| 9   | 9        | `kRightKnee.q`          |
-| 10  | 10       | `kRightAnklePitch.q`    |
-| 11  | 11       | `kRightAnkleRoll.q`     |
-| 12  | 12       | `kWaistYaw.q`           |
-| 13  | 15       | `kLeftShoulderPitch.q`  |
-| 14  | 16       | `kLeftShoulderRoll.q`   |
-| 15  | 17       | `kLeftShoulderYaw.q`    |
-| 16  | 18       | `kLeftElbow.q`          |
-| 17  | 19       | `kLeftWristRoll.q`      |
-| 18  | 22       | `kRightShoulderPitch.q` |
-| 19  | 23       | `kRightShoulderRoll.q`  |
-| 20  | 24       | `kRightShoulderYaw.q`   |
-| 21  | 25       | `kRightElbow.q`         |
-| 22  | 26       | `kRightWristRoll.q`     |
+By default each hand is recorded as a single closure value instead of its 8 servos (see
+[Hand representation](#hand-representation)), giving 33 action/observation keys. With
+`--robot.hand_representation=per_motor` all 16 hand servos are recorded (47 keys). The first 29
+state columns, and with a locomotion controller the first 18 action columns, are identical to a
+stock `unitree_g1` dataset.
 
-(Generated from `g1_ah_joints.BODY_KEYS` / `G1_23_BODY_JOINTS`.)
+### Body (29, SDK order)
+
+| SDK slot | Lerobot key             | Note                                |
+| -------- | ----------------------- | ----------------------------------- |
+| 0        | `kLeftHipPitch.q`       |                                     |
+| 1        | `kLeftHipRoll.q`        |                                     |
+| 2        | `kLeftHipYaw.q`         |                                     |
+| 3        | `kLeftKnee.q`           |                                     |
+| 4        | `kLeftAnklePitch.q`     |                                     |
+| 5        | `kLeftAnkleRoll.q`      |                                     |
+| 6        | `kRightHipPitch.q`      |                                     |
+| 7        | `kRightHipRoll.q`       |                                     |
+| 8        | `kRightHipYaw.q`        |                                     |
+| 9        | `kRightKnee.q`          |                                     |
+| 10       | `kRightAnklePitch.q`    |                                     |
+| 11       | `kRightAnkleRoll.q`     |                                     |
+| 12       | `kWaistYaw.q`           |                                     |
+| 13       | `kWaistRoll.q`          | unused on this hardware, always 0.0 |
+| 14       | `kWaistPitch.q`         | unused on this hardware, always 0.0 |
+| 15       | `kLeftShoulderPitch.q`  |                                     |
+| 16       | `kLeftShoulderRoll.q`   |                                     |
+| 17       | `kLeftShoulderYaw.q`    |                                     |
+| 18       | `kLeftElbow.q`          |                                     |
+| 19       | `kLeftWristRoll.q`      |                                     |
+| 20       | `kLeftWristPitch.q`     | unused on this hardware, always 0.0 |
+| 21       | `kLeftWristYaw.q`       | unused on this hardware, always 0.0 |
+| 22       | `kRightShoulderPitch.q` |                                     |
+| 23       | `kRightShoulderRoll.q`  |                                     |
+| 24       | `kRightShoulderYaw.q`   |                                     |
+| 25       | `kRightElbow.q`         |                                     |
+| 26       | `kRightWristRoll.q`     |                                     |
+| 27       | `kRightWristPitch.q`    | unused on this hardware, always 0.0 |
+| 28       | `kRightWristYaw.q`      | unused on this hardware, always 0.0 |
+
+(Generated from `g1_ah_joints.BODY_KEYS`, i.e. `G1_29_JointIndex`, the same keys as the stock robot.)
 
 ### Head (2)
 
@@ -69,8 +83,8 @@ motor IDs 11–18.
 
 | Value               | Hand keys                                        | No controller | With a locomotion controller |
 | ------------------- | ------------------------------------------------ | ------------- | ---------------------------- |
-| `closure` (default) | `left_hand.closure`, `right_hand.closure`        | 27 / 27       | 18 / 27                      |
-| `per_motor`         | the 16 `{side}_hand_finger{i}_motor{j}.q` servos | 41 / 41       | 32 / 41                      |
+| `closure` (default) | `left_hand.closure`, `right_hand.closure`        | 33 / 33       | 22 / 33                      |
+| `per_motor`         | the 16 `{side}_hand_finger{i}_motor{j}.q` servos | 47 / 47       | 36 / 47                      |
 
 (Counts are `action` / `observation.state`.) Closure is a value in [0, 1]: 0 = open, 1 = closed.
 
@@ -92,8 +106,11 @@ interpolation is the lerobot convention, not an upstream one.
 The 23dof body is a 29dof Unitree SDK message with 6 slots that don't exist on this
 hardware — waist roll/pitch (slots 13, 14) and the two wrist pitch/yaw pairs (slots 20, 21,
 27, 28). `G1_23_INVALID_SDK_SLOTS = (13, 14, 20, 21, 27, 28)` in `g1_ah_joints.py` is the
-single source of truth; `UnitreeG1Ah.publish_lowcmd` zeroes `kp`/`kd` on those slots so the SDK
-never applies torque to a joint that isn't physically present.
+single source of truth. `UnitreeG1Ah.publish_lowcmd` zeroes `kp`/`kd` on those slots and drops any
+target sent to them, so the SDK never applies torque to a joint that isn't physically present.
+The slots stay in the dataset for compatibility with stock `unitree_g1` datasets:
+`get_observation` always reports them as exactly 0.0, and with a locomotion controller the 4 wrist
+pitch/yaw targets in `action` are recorded but ignored.
 
 ### `revision` / `mode_machine`
 
@@ -363,13 +380,14 @@ forwards the triggers as `remote.button.0` / `remote.button.4`, the slots GR00T 
 the Unitree wireless remote (R1 itself is the hand button here). Both are 29dof-trained policies
 running on the 23dof UnitreeG1Ah body — GR00T's waist roll/pitch outputs land on slots the 23dof
 lacks and are dropped — **unverified on UnitreeG1Ah hardware**; use a gantry. Action features drop
-to arms + head + hands + remote axes in this mode (the controller owns legs/waist): the 18-key
-`CLOSURE_ARM_MODE_ACTION_KEYS`, or the 32-key `ARM_MODE_ACTION_KEYS` with `hand_representation=per_motor`.
-`observation.state` keeps the full body (27 or 41 keys).
+to the stock layout's 14 arm targets + `remote.lx/ly/rx/ry`, followed by head + hands, in this mode
+(the controller owns legs/waist): the 22-key `CLOSURE_ARM_MODE_ACTION_KEYS`, or the 36-key
+`ARM_MODE_ACTION_KEYS` with `hand_representation=per_motor`. `observation.state` keeps the full
+body (33 or 47 keys).
 
 ## Teleoperate (keyboard)
 
-No gamepad on hand: `unitree_g1_ah_keyboard` emits the same 63-key action space, driven
+No gamepad on hand: `unitree_g1_ah_keyboard` emits the same 69-key action space, driven
 from a `pynput` keyboard listener instead of a joystick. It needs an X11 or Wayland
 session with `pynput` installed (`pip install 'lerobot[pynput-dep]'`); on a headless SSH
 session it logs a warning and produces no key input (see `docs/source/unitree_g1_ah.mdx`'s
@@ -431,13 +449,14 @@ lerobot-record \
 After recording, check `meta/info.json` in the dataset:
 
 - `"robot_type"` should read `"unitree_g1_23dof_ah8_d455_2dof_rev_1_0"` (or the `base` variant).
-- `features["observation.state"]["shape"]` should be `[27]` (`[41]` with
+- `features["observation.state"]["shape"]` should be `[33]` (`[47]` with
   `hand_representation=per_motor`), with or without a locomotion controller.
-- `features["action"]["shape"]` should match it without a controller, and be `[18]` (`[32]` with
+- `features["action"]["shape"]` should match it without a controller, and be `[22]` (`[36]` with
   `per_motor`) with one.
-- The names should be in body → head → left hand → right hand order, matching
-  `CLOSURE_ACTION_KEYS` (`ALL_ACTION_KEYS` for `per_motor`) in `g1_ah_joints.py`; with a
-  controller, `action` matches `CLOSURE_ARM_MODE_ACTION_KEYS` (`ARM_MODE_ACTION_KEYS`).
+- State names are in body (29) → head → left hand → right hand order, matching
+  `CLOSURE_ACTION_KEYS` (`ALL_ACTION_KEYS` for `per_motor`) in `g1_ah_joints.py`. With a
+  controller, `action` is arms (14) → remote axes → head → hands, matching
+  `CLOSURE_ARM_MODE_ACTION_KEYS` (`ARM_MODE_ACTION_KEYS`).
 
 ---
 

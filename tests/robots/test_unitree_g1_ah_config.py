@@ -121,21 +121,21 @@ class TestG1AhConfigValidation:
 class TestG1AhDatasetFeatures:
     def test_action_feature_shape_and_names(self):
         ds_features = hw_to_dataset_features(dict.fromkeys(ALL_ACTION_KEYS, float), "action")
-        assert ds_features["action"]["shape"] == (41,)
+        assert ds_features["action"]["shape"] == (47,)
         assert ds_features["action"]["names"] == list(ALL_ACTION_KEYS)
 
     def test_build_dataset_frame_with_teleop_keys(self):
         ds_features = hw_to_dataset_features(dict.fromkeys(ALL_ACTION_KEYS, float), "action")
         values = dict.fromkeys(TELEOP_ACTION_KEYS, 0.0)
         frame = build_dataset_frame(ds_features, values, "action")
-        assert frame["action"].shape == (41,)
+        assert frame["action"].shape == (47,)
 
     def test_build_closure_dataset_frame_with_teleop_keys(self):
         ds_features = hw_to_dataset_features(dict.fromkeys(CLOSURE_ACTION_KEYS, float), "action")
         values = dict.fromkeys(TELEOP_ACTION_KEYS, 0.0)
         values["right_hand.closure"] = 0.75
         frame = build_dataset_frame(ds_features, values, "action")
-        assert frame["action"].shape == (27,)
+        assert frame["action"].shape == (33,)
         assert frame["action"][ds_features["action"]["names"].index("right_hand.closure")] == 0.75
 
 

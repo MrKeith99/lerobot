@@ -93,14 +93,16 @@ HAND_MOTORS: dict[str, tuple[int, str]] = {
 }
 HEAD_HAND_MOTORS: dict[str, tuple[int, str]] = {**HEAD_MOTORS, **HAND_MOTORS}
 
-BODY_KEYS: tuple[str, ...] = tuple(f"{joint.name}.q" for joint in G1_23_BODY_JOINTS)
-ARM_KEYS: tuple[str, ...] = tuple(f"{joint.name}.q" for joint in G1_23_ARM_JOINTS)
+# The body keeps the stock unitree_g1 29-slot SDK layout; the 6 slots missing on this 23dof
+# hardware (INVALID_BODY_KEYS) are recorded as 0.0 and never commanded.
+BODY_KEYS: tuple[str, ...] = tuple(f"{joint.name}.q" for joint in G1_29_JointIndex)
+ARM_KEYS: tuple[str, ...] = tuple(f"{joint.name}.q" for joint in G1_29_JointArmIndex)
 HEAD_KEYS: tuple[str, ...] = ("xl330_joint.q", "d455_joint.q")
 LEFT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_names("left"))
 RIGHT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_names("right"))
 HAND_KEYS: tuple[str, ...] = LEFT_HAND_KEYS + RIGHT_HAND_KEYS
 ALL_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + LEFT_HAND_KEYS + RIGHT_HAND_KEYS
-ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + HEAD_KEYS + HAND_KEYS + REMOTE_AXES
+ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + REMOTE_AXES + HEAD_KEYS + HAND_KEYS
 HAND_REPRESENTATIONS: tuple[str, ...] = ("closure", "per_motor")
 
 
@@ -113,7 +115,7 @@ def hand_closure_key(side: str) -> str:
 
 HAND_CLOSURE_KEYS: tuple[str, ...] = tuple(hand_closure_key(side) for side in HAND_SIDES)
 CLOSURE_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + HAND_CLOSURE_KEYS
-CLOSURE_ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + HEAD_KEYS + HAND_CLOSURE_KEYS + REMOTE_AXES
+CLOSURE_ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + REMOTE_AXES + HEAD_KEYS + HAND_CLOSURE_KEYS
 TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + HAND_CLOSURE_KEYS + REMOTE_KEYS
 INVALID_BODY_KEYS: tuple[str, ...] = tuple(
     f"{joint.name}.q" for joint in G1_29_JointIndex if joint in G1_23_INVALID_SDK_SLOTS
@@ -239,7 +241,7 @@ DEFAULT_HAND_Q: dict[str, tuple[float, ...]] = {
 
 
 def default_action() -> dict[str, float]:
-    """Return a default action dict with all 41 keys: zero body/head, hands open."""
+    """Return a default action dict with all per-motor keys: zero body/head, hands open."""
     action = dict.fromkeys(BODY_KEYS, 0.0)
     action.update(zip(HEAD_KEYS, DEFAULT_HEAD_Q, strict=True))
     action.update(zip(LEFT_HAND_KEYS, DEFAULT_HAND_Q["left"], strict=True))

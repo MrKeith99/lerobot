@@ -66,7 +66,7 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 
 class UnitreeG1AhGamepadTeleop(Teleoperator):
-    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (63 keys)."""
+    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (69 keys)."""
 
     config_class = UnitreeG1AhGamepadTeleopConfig
     name = "unitree_g1_ah_gamepad"

@@ -190,8 +190,8 @@ class TestG1AhFeatures:
     def test_default_hand_representation_is_closure(self, g1ah_robot):
         robot, _ = g1ah_robot
         assert robot.config.hand_representation == "closure"
-        assert len(robot.observation_features) == 27
-        assert len(robot.action_features) == 27
+        assert len(robot.observation_features) == 33
+        assert len(robot.action_features) == 33
 
     @pytest.mark.parametrize("hand_representation", ["closure", "per_motor"])
     def test_observation_and_action_features_no_controller(
@@ -343,6 +343,18 @@ class TestG1AhConnect:
             assert f"{joint.name}.q" in obs
         for name in HEAD_HAND_MOTORS:
             assert f"{name}.q" in obs
+
+    def test_missing_body_slots_are_recorded_as_zero(self, g1ah_robot):
+        from lerobot.robots.unitree_g1_ah.g1_ah_joints import INVALID_BODY_KEYS
+
+        robot, _ = g1ah_robot
+        robot.connect(calibrate=False)
+        obs = robot.get_observation()
+        body_keys = [key for key in robot.observation_features if key.startswith("k")]
+        assert len(body_keys) == 29
+        for key in INVALID_BODY_KEYS:
+            assert obs[key] == 0.0
+        assert obs["kLeftElbow.q"] != 0.0
 
     def test_send_action_zeroes_invalid_slot_gains(self, g1ah_robot):
         robot, mocks = g1ah_robot

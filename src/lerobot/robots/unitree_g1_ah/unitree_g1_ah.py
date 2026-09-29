@@ -302,6 +302,8 @@ class UnitreeG1Ah(UnitreeG1):
 
     def get_observation(self) -> RobotObservation:
         obs = super().get_observation()
+        for key in INVALID_BODY_KEYS:
+            obs[key] = 0.0
 
         data = self.headhand.read_latest()
         if data and data.get("ticks"):

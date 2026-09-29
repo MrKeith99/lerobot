@@ -22,24 +22,35 @@ from lerobot.robots.unitree_g1_ah import g1_ah_joints as j
 
 
 def test_key_counts():
-    assert len(j.BODY_KEYS) == 23
-    assert len(j.ARM_KEYS) == 10
+    assert len(j.BODY_KEYS) == 29
+    assert len(j.ARM_KEYS) == 14
     assert len(j.HEAD_KEYS) == 2
     assert len(j.LEFT_HAND_KEYS) == 8
     assert len(j.RIGHT_HAND_KEYS) == 8
     assert len(j.HAND_KEYS) == 16
-    assert len(j.ALL_ACTION_KEYS) == 41
-    assert len(j.ARM_MODE_ACTION_KEYS) == 32
-    assert len(j.TELEOP_ACTION_KEYS) == 63
+    assert len(j.ALL_ACTION_KEYS) == 47
+    assert len(j.ARM_MODE_ACTION_KEYS) == 36
+    assert len(j.TELEOP_ACTION_KEYS) == 69
     assert len(j.HEAD_HAND_KEYS) == 18
     assert j.HAND_CLOSURE_KEYS == ("left_hand.closure", "right_hand.closure")
-    assert len(j.CLOSURE_ACTION_KEYS) == 27
-    assert len(j.CLOSURE_ARM_MODE_ACTION_KEYS) == 18
+    assert len(j.CLOSURE_ACTION_KEYS) == 33
+    assert len(j.CLOSURE_ARM_MODE_ACTION_KEYS) == 22
 
 
-def test_closure_key_order_body_head_left_right():
+def test_body_and_arm_keys_match_stock_unitree_g1():
+    from lerobot.robots.unitree_g1.g1_utils import G1_29_JointArmIndex, G1_29_JointIndex
+
+    assert tuple(f"{joint.name}.q" for joint in G1_29_JointIndex) == j.BODY_KEYS
+    assert tuple(f"{joint.name}.q" for joint in G1_29_JointArmIndex) == j.ARM_KEYS
+
+
+def test_extras_are_appended_after_stock_columns():
+    stock_controller_action = j.ARM_KEYS + j.REMOTE_AXES
     assert j.CLOSURE_ACTION_KEYS == j.BODY_KEYS + j.HEAD_KEYS + ("left_hand.closure", "right_hand.closure")
-    assert j.CLOSURE_ARM_MODE_ACTION_KEYS[-4:] == j.REMOTE_AXES
+    assert j.ALL_ACTION_KEYS[:29] == j.BODY_KEYS
+    assert j.CLOSURE_ARM_MODE_ACTION_KEYS[:18] == stock_controller_action
+    assert j.ARM_MODE_ACTION_KEYS[:18] == stock_controller_action
+    assert j.CLOSURE_ARM_MODE_ACTION_KEYS[18:] == j.HEAD_KEYS + j.HAND_CLOSURE_KEYS
     assert set(j.CLOSURE_ACTION_KEYS) <= set(j.TELEOP_ACTION_KEYS)
     assert set(j.CLOSURE_ARM_MODE_ACTION_KEYS) <= set(j.TELEOP_ACTION_KEYS)
 
@@ -98,9 +109,10 @@ def test_arm_keys_subset_of_body_keys():
     assert set(j.ARM_KEYS) <= set(j.BODY_KEYS)
 
 
-def test_invalid_body_keys_disjoint_from_body_keys():
-    assert set(j.INVALID_BODY_KEYS) & set(j.BODY_KEYS) == set()
+def test_invalid_body_keys_are_the_six_missing_slots_of_body_keys():
+    assert set(j.INVALID_BODY_KEYS) <= set(j.BODY_KEYS)
     assert len(j.INVALID_BODY_KEYS) == 6
+    assert [j.BODY_KEYS.index(key) for key in j.INVALID_BODY_KEYS] == list(j.G1_23_INVALID_SDK_SLOTS)
 
 
 def test_hand_names_and_ids_unique():
@@ -129,10 +141,10 @@ def test_keys_have_no_slash_and_end_with_q_except_remote_and_closure():
 
 def test_slices_for_all_action_keys():
     slices = j.slices_for(j.ALL_ACTION_KEYS)
-    assert slices.body == slice(0, 23)
-    assert slices.head == slice(23, 25)
-    assert slices.left_hand == slice(25, 33)
-    assert slices.right_hand == slice(33, 41)
+    assert slices.body == slice(0, 29)
+    assert slices.head == slice(29, 31)
+    assert slices.left_hand == slice(31, 39)
+    assert slices.right_hand == slice(39, 47)
 
 
 def test_slices_for_raises_on_non_contiguous():
@@ -144,7 +156,7 @@ def test_slices_for_raises_on_non_contiguous():
 def test_action_vector_round_trip():
     action = j.default_action()
     vec = j.action_to_vector(action, j.ALL_ACTION_KEYS)
-    assert len(vec) == 41
+    assert len(vec) == 47
     round_tripped = j.vector_to_action(vec, j.ALL_ACTION_KEYS)
     assert round_tripped == action
 
