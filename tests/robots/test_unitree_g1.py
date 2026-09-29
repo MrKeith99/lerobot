@@ -273,6 +273,7 @@ def test_disconnect_idempotent(unitree_g1):
 def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
     robot, _ = unitree_g1
     fake_inner_env = MagicMock()
+    fake_inner_env.simulator = None  # no elastic band / bridge joystick to poll
     fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
 
     with patch("lerobot.envs.make_env", return_value=fake_env_wrapper) as mock_make_env:
@@ -280,3 +281,80 @@ def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
         mock_make_env.assert_called_once_with(robot.config.sim_env_repo_id, trust_remote_code=True)
         assert robot.config.sim_env_repo_id == "lerobot/unitree-g1-mujoco"
         assert robot.sim_env is fake_inner_env
+
+
+def _attach_fake_sim(robot, pressed: set[int], band_enabled: bool = False, num_buttons: int = 13):
+    """Give the robot a fake MuJoCo env: elastic band, bridge low_cmd and a joystick with `pressed` buttons."""
+    band = MagicMock()
+    band.enable = band_enabled
+    band.length = 5.0
+    joystick = MagicMock()
+    joystick.get_numbuttons.return_value = num_buttons
+    joystick.get_button.side_effect = lambda index: index in pressed
+    bridge = MagicMock()
+    bridge.joystick = joystick
+    bridge.low_cmd.motor_cmd = [MagicMock() for _ in range(35)]
+    sim = MagicMock()
+    sim.elastic_band = band
+    sim.unitree_bridge = bridge
+    robot.sim_env = MagicMock()
+    robot.sim_env.simulator.sim_env = sim
+    return band, bridge
+
+
+def test_sim_band_attached_false_without_sim(unitree_g1):
+    robot, _ = unitree_g1
+    assert robot.sim_env is None
+    assert robot._sim_band_attached() is False
+    robot._poll_sim_gamepad_buttons()  # no sim: must be a no-op
+
+
+def test_sim_band_toggle_button_is_edge_triggered(unitree_g1):
+    robot, _ = unitree_g1
+    pressed: set[int] = set()
+    band, _ = _attach_fake_sim(robot, pressed, band_enabled=True)
+    toggle = robot.config.sim_band_toggle_button
+
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is True
+
+    pressed.add(toggle)
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is False
+    assert robot._sim_band_attached() is False
+    robot._poll_sim_gamepad_buttons()  # still held: no second toggle
+    assert band.enable is False
+
+    pressed.discard(toggle)
+    robot._poll_sim_gamepad_buttons()
+    pressed.add(toggle)
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is True
+    assert robot._sim_band_attached() is True
+
+
+def test_sim_band_toggle_button_out_of_range_is_ignored(unitree_g1):
+    robot, _ = unitree_g1
+    band, _ = _attach_fake_sim(robot, {robot.config.sim_band_toggle_button}, band_enabled=True, num_buttons=5)
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is True
+
+
+def test_sim_reset_button_reattaches_band_and_limps_legs(unitree_g1):
+    robot, mocks = unitree_g1
+    robot.msg = mocks["lowcmd_default"]
+    band, bridge = _attach_fake_sim(robot, {robot.config.sim_reset_button}, band_enabled=False)
+
+    robot._poll_sim_gamepad_buttons()
+
+    assert band.enable is True
+    assert band.length == 0
+    robot.sim_env.reset.assert_called_once_with()
+    for motor in range(15):
+        assert robot.msg.motor_cmd[motor].kp == 0.0
+        assert robot.msg.motor_cmd[motor].kd == 0.0
+        assert robot.msg.motor_cmd[motor].tau == 0.0
+        assert bridge.low_cmd.motor_cmd[motor].kp == 0.0
+        assert bridge.low_cmd.motor_cmd[motor].kd == 0.0
+    assert robot.msg.motor_cmd[15].kp != 0.0  # arms untouched
+    assert bridge.low_cmd.motor_cmd[15].kp != 0.0

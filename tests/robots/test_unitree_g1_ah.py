@@ -360,6 +360,7 @@ class TestG1AhSimulationConnect:
         patches, *_ = _make_g1ah(mocks)
 
         fake_inner_env = MagicMock()
+        fake_inner_env.simulator = None  # no elastic band / bridge joystick to poll
         fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
 
         with contextlib.ExitStack() as stack:

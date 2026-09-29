@@ -444,9 +444,17 @@ and CycloneDDS (see the Python 3.12 note above) plus `pip install mujoco loguru 
 `make_env` cannot forward options to the hub env; use `UNITREE_G1_MUJOCO_<OPTION>` environment
 variables instead (`ONSCREEN=0` for headless, `BODY=29dof`, `END_EFFECTOR=dex1|dex3|dummy|amazing_hand`,
 `HEAD=none|d455_pan_tilt`, `JOYSTICK_TYPE=dualshock4|xbox|switch`, `HEADHAND_STATE_PORT`,
-`HEADHAND_CMD_PORT`). In the MuJoCo viewer, `9` releases the elastic band holding the robot,
-`7`/`8` change the waist height. After `disconnect()` the process may not exit on its own because of
-CycloneDDS finalizers — end it with Ctrl-C.
+`HEADHAND_CMD_PORT`). In the MuJoCo viewer, `9` toggles the elastic band holding the robot and
+`7`/`8` raise/lower it (the band, not the policy's waist height). With a gamepad attached the same
+band toggle is on the PS button and the Options button resets the robot to its start pose with the
+band attached (`--robot.sim_band_toggle_button` / `--robot.sim_reset_button`, pygame indices for a
+DualShock 4 under the kernel driver; `None` disables). While the band is attached the locomotion
+controller is held off and the legs/waist go limp, so the policy cannot kick while hanging; it is
+reset and resumed when the band is released. On GNOME Wayland launch with
+`PYGLFW_LIBRARY_VARIANT=x11 SDL_VIDEODRIVER=x11`: the GLFW viewer and SDL2 (pygame) both load
+libdecor-gtk and deadlock GTK within minutes otherwise. After `disconnect()` the process may not
+exit on its own because of CycloneDDS finalizers — kill the `lerobot-teleoperate` PID and its
+`multiprocessing.spawn` image-publisher child.
 
 ---
 

@@ -159,6 +159,62 @@ class UnitreeG1(Robot):
         self._controller_action_lock = threading.Lock()
         self.controller_input = default_remote_input()
         self.controller_output = {}
+        self._band_button_was_pressed = False
+        self._reset_button_was_pressed = False
+        self._band_was_attached = False
+
+    def _sim_band_attached(self) -> bool:
+        """True while the simulated robot hangs on the MuJoCo elastic band."""
+        sim = getattr(getattr(self.sim_env, "simulator", None), "sim_env", None)
+        band = getattr(sim, "elastic_band", None)
+        return band is not None and band.enable
+
+    def _make_sim_legs_limp(self) -> None:
+        """Zero legs/waist gains in the command send_action keeps republishing and in the one the sim holds."""
+        msg = getattr(self, "msg", None)
+        if msg is not None:
+            with self._lowcmd_lock:
+                for motor in range(15):  # legs + waist (controller-owned joints)
+                    msg.motor_cmd[motor].kp = 0.0
+                    msg.motor_cmd[motor].kd = 0.0
+                    msg.motor_cmd[motor].tau = 0.0
+        sim = getattr(getattr(self.sim_env, "simulator", None), "sim_env", None)
+        bridge = getattr(sim, "unitree_bridge", None)
+        if bridge is not None:
+            with bridge.low_cmd_lock:
+                for motor_cmd in bridge.low_cmd.motor_cmd[:15]:
+                    motor_cmd.kp = 0.0
+                    motor_cmd.kd = 0.0
+                    motor_cmd.tau = 0.0
+
+    def _poll_sim_gamepad_buttons(self):
+        """Sim-only gamepad shortcuts: toggle the elastic band (same as "9" in the MuJoCo viewer) and reset."""
+        sim = getattr(getattr(self.sim_env, "simulator", None), "sim_env", None)
+        joystick = getattr(getattr(sim, "unitree_bridge", None), "joystick", None)
+        band = getattr(sim, "elastic_band", None)
+        if joystick is None or band is None:
+            return
+
+        def just_pressed(button: int | None, was_pressed_attr: str) -> bool:
+            if button is None or button >= joystick.get_numbuttons():
+                return False
+            pressed = bool(joystick.get_button(button))
+            was_pressed = getattr(self, was_pressed_attr)
+            setattr(self, was_pressed_attr, pressed)
+            return pressed and not was_pressed
+
+        if just_pressed(self.config.sim_band_toggle_button, "_band_button_was_pressed"):
+            band.enable = not band.enable
+            logger.info(f"Elastic band {'attached' if band.enable else 'released'}")
+
+        if just_pressed(self.config.sim_reset_button, "_reset_button_was_pressed"):
+            # Runs on the sim-stepping thread, so MuJoCo state is never modified mid-step
+            band.enable = True
+            band.length = 0
+            self.sim_env.reset()
+            # Legs go limp right away; the controller loop keeps the policy off until the band is released
+            self._make_sim_legs_limp()
+            logger.info("Simulation reset: robot back at start pose with elastic band attached")
 
     def _subscribe_lowstate(self):  # polls robot state @ 250Hz
         while not self._shutdown_event.is_set():
@@ -167,6 +223,7 @@ class UnitreeG1(Robot):
             # Step simulation if in simulation mode
             if self.config.is_simulation and self.sim_env is not None:
                 self.sim_env.step()
+                self._poll_sim_gamepad_buttons()
 
             msg = self.lowstate_subscriber.Read()
             if msg is not None:
@@ -275,8 +332,26 @@ class UnitreeG1(Robot):
                 with self._controller_action_lock:
                     controller_input = dict(self.controller_input)
 
+                # Simulation: keep the policy off while the robot hangs on the elastic band (legs limp) and start it
+                # from a fresh state when the band is released. Run while hanging, the policy can lock into a
+                # sustained leg-kicking oscillation, e.g. after a reset.
+                if self._sim_band_attached():
+                    if not self._band_was_attached:
+                        self._band_was_attached = True
+                        self._make_sim_legs_limp()
+                    time.sleep(control_dt)
+                    continue
+                if self._band_was_attached:
+                    self._band_was_attached = False
+                    if hasattr(self.controller, "reset"):
+                        self.controller.reset()
+
                 # Run controller step
                 controller_action = self.controller.run_step(controller_input, lowstate)
+
+                # Band re-attached during this step: drop its output so it can't restore the leg gains
+                if self._sim_band_attached():
+                    continue
 
                 # Write controller output snapshot
                 with self._controller_action_lock:
