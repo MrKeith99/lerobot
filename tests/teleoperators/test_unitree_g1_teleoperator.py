@@ -25,7 +25,7 @@ from lerobot.utils.import_utils import _unitree_sdk_available
 if not _unitree_sdk_available:
     pytest.skip("Unitree SDK not available", allow_module_level=True)
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES
+from lerobot.robots.unitree_g1.g1_utils import REMOTE_BUTTONS, REMOTE_KEYS
 from lerobot.teleoperators.unitree_g1.config_unitree_g1 import (
     ExoskeletonArmPortConfig,
     UnitreeG1TeleoperatorConfig,
@@ -77,12 +77,23 @@ def test_sync_remote_action(remote_controller):
     rc.ly = -0.3
     rc.rx = 0.1
     rc.ry = 0.0
+    rc.button[0] = 1
+    rc.button[4] = 1
     rc._sync_remote_action()
 
     assert rc.remote_action["remote.lx"] == 0.5
     assert rc.remote_action["remote.ly"] == -0.3
     assert rc.remote_action["remote.rx"] == 0.1
     assert rc.remote_action["remote.ry"] == 0.0
+    assert rc.remote_action["remote.button.0"] == 1.0
+    assert rc.remote_action["remote.button.4"] == 1.0
+    assert all(
+        rc.remote_action[k] == 0.0 for k in REMOTE_BUTTONS if k not in ("remote.button.0", "remote.button.4")
+    )
+
+    rc.button[0] = 0
+    rc._sync_remote_action()
+    assert rc.remote_action["remote.button.0"] == 0.0
 
 
 def test_set_from_wireless_calls_extract(remote_controller):
@@ -204,8 +215,8 @@ def test_remote_only_connect(teleop_remote_only):
 def test_remote_only_action_features(teleop_remote_only):
     teleop = teleop_remote_only
     features = teleop.action_features
-    # Remote-only: just the 4 remote axes
-    assert set(features.keys()) == set(REMOTE_AXES)
+    # Remote-only: the 4 remote axes + 16 remote buttons
+    assert set(features.keys()) == set(REMOTE_KEYS)
 
 
 def test_feedback_features(teleop_remote_only):
@@ -219,7 +230,7 @@ def test_remote_only_get_action(teleop_remote_only):
     teleop = teleop_remote_only
     teleop.connect()
     action = teleop.get_action()
-    assert set(action.keys()) == set(REMOTE_AXES)
+    assert set(action.keys()) == set(REMOTE_KEYS)
     assert all(isinstance(v, float) for v in action.values())
 
 

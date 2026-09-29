@@ -19,7 +19,7 @@ import time
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, G1_29_JointArmIndex
+from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS, G1_29_JointArmIndex
 from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, TELEOPERATORS
 from lerobot.utils.import_utils import _unitree_sdk_available
 
@@ -79,7 +79,7 @@ class RemoteController:
         self.rx = 0.0
         self.ry = 0.0
         self.button = [0] * 16
-        self.remote_action = dict.fromkeys(REMOTE_AXES, 0.0)
+        self.remote_action = dict.fromkeys(REMOTE_KEYS, 0.0)
 
         # SDK joystick parser for wireless remote bytes
         self._joystick = Joystick()
@@ -100,6 +100,7 @@ class RemoteController:
 
     def _sync_remote_action(self) -> None:
         self.remote_action.update(zip(REMOTE_AXES, (self.lx, self.ly, self.rx, self.ry), strict=True))
+        self.remote_action.update(zip(REMOTE_BUTTONS, (float(b) for b in self.button), strict=True))
 
     def calibrate_center(self, raw16: list[int] | None, side: str) -> None:
         if raw16 is None or len(raw16) < 16:
