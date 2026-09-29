@@ -424,9 +424,12 @@ repo only ships 29dof bodies. The fork
 
 ```bash
 # custom robot: body + head + hands, gamepad teleop (plug the DualShock 4 in first)
+# PS toggles the elastic band; sim reset moved to Share (8) because Options (9) is the
+# gamepad teleop's intervention button
 lerobot-teleoperate \
   --robot.type=unitree_g1_23dof_ah8_d455_2dof \
   --robot.is_simulation=true --robot.id=sim \
+  --robot.sim_reset_button=8 \
   --teleop.type=unitree_g1_ah_gamepad \
   --robot.cameras='{"head": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"head_camera","width":640,"height":480,"fps":30,"warmup_s":5}}' \
   --display_data=true
@@ -446,9 +449,11 @@ variables instead (`ONSCREEN=0` for headless, `BODY=29dof`, `END_EFFECTOR=dex1|d
 `HEAD=none|d455_pan_tilt`, `JOYSTICK_TYPE=dualshock4|xbox|switch`, `HEADHAND_STATE_PORT`,
 `HEADHAND_CMD_PORT`). In the MuJoCo viewer, `9` toggles the elastic band holding the robot and
 `7`/`8` raise/lower it (the band, not the policy's waist height). With a gamepad attached the same
-band toggle is on the PS button and the Options button resets the robot to its start pose with the
-band attached (`--robot.sim_band_toggle_button` / `--robot.sim_reset_button`, pygame indices for a
-DualShock 4 under the kernel driver; `None` disables). While the band is attached the locomotion
+band toggle is on the PS button and, by default, the Options button resets the robot to its start
+pose with the band attached (`--robot.sim_band_toggle_button` / `--robot.sim_reset_button`, pygame
+indices for a DualShock 4 under the kernel driver; `None` disables). Options is also the
+`unitree_g1_ah_gamepad` intervention button (`button_start`), so the examples above pass
+`--robot.sim_reset_button=8` (Share) whenever that teleop is used. While the band is attached the locomotion
 controller is held off and the legs/waist go limp, so the policy cannot kick while hanging; it is
 reset and resumed when the band is released. On GNOME Wayland launch with
 `PYGLFW_LIBRARY_VARIANT=x11 SDL_VIDEODRIVER=x11`: the GLFW viewer and SDL2 (pygame) both load
