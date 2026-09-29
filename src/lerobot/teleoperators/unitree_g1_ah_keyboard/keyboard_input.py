@@ -54,10 +54,12 @@ from lerobot.utils.keyboard_input import pynput_can_capture
 from ..utils import TeleopEvents
 from .config_unitree_g1_ah_keyboard import UnitreeG1AhKeyboardTeleopConfig
 
+pynput_keyboard = None
 if TYPE_CHECKING or _pynput_available:
-    import pynput.keyboard as pynput_keyboard
-else:
-    pynput_keyboard = None  # type: ignore[assignment]
+    try:
+        import pynput.keyboard as pynput_keyboard
+    except Exception as e:
+        logging.info("Could not import pynput keyboard backend: %s", e)
 
 if TYPE_CHECKING or _pygame_available:
     import pygame
@@ -133,7 +135,7 @@ class UnitreeG1AhKeyboardInput:
             return
         if backend != "pynput":
             raise ValueError(f"Unknown keyboard backend {backend!r}; use 'window', 'pynput' or 'external'")
-        if not (_pynput_available and pynput_can_capture()):
+        if pynput_keyboard is None or not pynput_can_capture():
             logging.warning(
                 "pynput cannot capture keys in this session (Wayland/headless). Keys are only taken "
                 "from in-process sources such as the MuJoCo viewer window (focus it and type)."

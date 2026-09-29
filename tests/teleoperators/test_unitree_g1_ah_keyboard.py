@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -49,6 +52,16 @@ class FakeInput(UnitreeG1AhKeyboardInput):
 
     def stop(self) -> None:
         self.stopped = True
+
+
+@pytest.mark.skipif(importlib.util.find_spec("pynput") is None, reason="pynput not installed")
+def test_keyboard_input_imports_when_pynput_backend_fails():
+    code = (
+        "import sys; sys.modules['pynput.keyboard'] = None; "
+        "import lerobot.teleoperators.unitree_g1_ah_keyboard.keyboard_input as m; "
+        "assert m.pynput_keyboard is None"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 # ── UnitreeG1AhKeyboardInput unit tests (no pynput, driven via press/release) ──
