@@ -68,8 +68,8 @@ def sdk29_from_body23(vec: Sequence[float], fill: float = 0.0) -> list[float]:
 
 
 HEAD_MOTORS: dict[str, tuple[int, str]] = {
-    "xl330_joint": (1, "xl330-m288"),
-    "d455_joint": (2, "xl330-m288"),
+    "kHeadYaw": (1, "xl330-m288"),
+    "kHeadPitch": (2, "xl330-m288"),
 }
 
 HAND_SIDES: tuple[str, ...] = ("left", "right")
@@ -82,8 +82,10 @@ HAND_MOTOR_MODEL = "scs0009"
 
 
 def hand_motor_names(side: str) -> tuple[str, ...]:
-    """Return the 8 motor names for one hand, ordered finger1_motor1..finger4_motor2."""
-    return tuple(f"{side}_hand_finger{i}_motor{j}" for i in range(1, 5) for j in range(1, 3))
+    """Return the 8 motor names for one hand, named by motor ID and ordered finger1 servo1..finger4 servo2."""
+    if side not in HAND_SIDES:
+        raise ValueError(f"Unknown hand side: {side!r}")
+    return tuple(f"k{side.capitalize()}HandMotor{motor_id}" for motor_id in HAND_MOTOR_IDS[side])
 
 
 HAND_MOTORS: dict[str, tuple[int, str]] = {
@@ -93,11 +95,24 @@ HAND_MOTORS: dict[str, tuple[int, str]] = {
 }
 HEAD_HAND_MOTORS: dict[str, tuple[int, str]] = {**HEAD_MOTORS, **HAND_MOTORS}
 
+# Motor names used before the Unitree-style rename, e.g. in older calibration files.
+LEGACY_MOTOR_NAMES: dict[str, str] = {
+    "xl330_joint": "kHeadYaw",
+    "d455_joint": "kHeadPitch",
+    **{
+        f"{side}_hand_finger{i}_motor{j}": name
+        for side in HAND_SIDES
+        for (i, j), name in zip(
+            ((i, j) for i in range(1, 5) for j in range(1, 3)), hand_motor_names(side), strict=True
+        )
+    },
+}
+
 # The body keeps the stock unitree_g1 29-slot SDK layout; the 6 slots missing on this 23dof
 # hardware (INVALID_BODY_KEYS) are recorded as 0.0 and never commanded.
 BODY_KEYS: tuple[str, ...] = tuple(f"{joint.name}.q" for joint in G1_29_JointIndex)
 ARM_KEYS: tuple[str, ...] = tuple(f"{joint.name}.q" for joint in G1_29_JointArmIndex)
-HEAD_KEYS: tuple[str, ...] = ("xl330_joint.q", "d455_joint.q")
+HEAD_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in HEAD_MOTORS)
 LEFT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_names("left"))
 RIGHT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_names("right"))
 HAND_KEYS: tuple[str, ...] = LEFT_HAND_KEYS + RIGHT_HAND_KEYS
@@ -110,7 +125,7 @@ def hand_closure_key(side: str) -> str:
     """Return the scalar closure key for one hand (0 = open, 1 = closed)."""
     if side not in HAND_SIDES:
         raise ValueError(f"Unknown hand side: {side!r}")
-    return f"{side}_hand.closure"
+    return f"k{side.capitalize()}Hand.closure"
 
 
 HAND_CLOSURE_KEYS: tuple[str, ...] = tuple(hand_closure_key(side) for side in HAND_SIDES)
@@ -177,8 +192,8 @@ def vector_to_action(vec: Sequence[float], keys: Sequence[str]) -> dict[str, flo
 
 
 HEAD_LIMITS_RAD: dict[str, tuple[float, float]] = {
-    "xl330_joint": (-0.7, 0.7),
-    "d455_joint": (-1.57, 0.8),
+    "kHeadYaw": (-0.7, 0.7),
+    "kHeadPitch": (-1.57, 0.8),
 }
 HAND_LIMIT_RAD = math.radians(90.0)
 HAND_OPEN_DEG: tuple[float, float] = (-35.0, 35.0)

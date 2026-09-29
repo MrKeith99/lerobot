@@ -71,12 +71,12 @@ def device(head_bus_mock, hand_bus_mock):
 
 
 def test_ticks_to_rad_zero_tick_is_zero_rad():
-    calib = d.default_calibration("xl330_joint")
+    calib = d.default_calibration("kHeadYaw")
     assert d.ticks_to_rad("xl330-m288", calib.homing_offset, calib) == pytest.approx(0.0)
 
 
 def test_ticks_to_rad_drive_mode_flips_sign():
-    calib_normal = d.default_calibration("xl330_joint")
+    calib_normal = d.default_calibration("kHeadYaw")
     tick = calib_normal.homing_offset + 100
     positive = d.ticks_to_rad("xl330-m288", tick, calib_normal)
 
@@ -109,9 +109,7 @@ def test_rad_to_ticks_clamps_at_tick_range():
     assert d.rad_to_ticks("xl330-m288", -100.0, calib) == 0
 
 
-@pytest.mark.parametrize(
-    "model,name", [("xl330-m288", "xl330_joint"), ("scs0009", "right_hand_finger1_motor1")]
-)
+@pytest.mark.parametrize("model,name", [("xl330-m288", "kHeadYaw"), ("scs0009", "kRightHandMotor1")])
 def test_rad_to_ticks_round_trip(model, name):
     calib = d.default_calibration(name)
     for tick in (calib.homing_offset - 50, calib.homing_offset, calib.homing_offset + 50):
@@ -120,10 +118,10 @@ def test_rad_to_ticks_round_trip(model, name):
 
 
 def test_clamp_rad_head_limits():
-    low, high = HEAD_LIMITS_RAD["xl330_joint"]
-    assert d.clamp_rad("xl330_joint", low - 1.0) == pytest.approx(low)
-    assert d.clamp_rad("xl330_joint", high + 1.0) == pytest.approx(high)
-    assert d.clamp_rad("xl330_joint", 0.0) == pytest.approx(0.0)
+    low, high = HEAD_LIMITS_RAD["kHeadYaw"]
+    assert d.clamp_rad("kHeadYaw", low - 1.0) == pytest.approx(low)
+    assert d.clamp_rad("kHeadYaw", high + 1.0) == pytest.approx(high)
+    assert d.clamp_rad("kHeadYaw", 0.0) == pytest.approx(0.0)
 
 
 def test_clamp_rad_hand_limits():

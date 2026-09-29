@@ -24,6 +24,7 @@ import math
 import threading
 import time
 from functools import cached_property
+from pathlib import Path
 
 import numpy as np
 
@@ -53,6 +54,7 @@ from .g1_ah_joints import (
     HEAD_LIMITS_RAD,
     HEAD_MOTORS,
     INVALID_BODY_KEYS,
+    LEGACY_MOTOR_NAMES,
     MIDDLE_POS_DEG,
     MODE_MACHINE_BY_REVISION,
     ROBOT_TYPE_BASE,
@@ -87,6 +89,16 @@ class UnitreeG1Ah(UnitreeG1):
         self._headhand_stale_logged = False
         self._headhand_warned_names: set[str] = set()
         self._invalid_slots = np.array(G1_23_INVALID_SDK_SLOTS)
+
+    def _load_calibration(self, fpath: Path | None = None) -> None:
+        super()._load_calibration(fpath)
+        legacy = [name for name in self.calibration if name in LEGACY_MOTOR_NAMES]
+        if legacy:
+            self.calibration = {
+                LEGACY_MOTOR_NAMES.get(name, name): calib for name, calib in self.calibration.items()
+            }
+            self._save_calibration(fpath)
+            logger.info(f"Renamed {len(legacy)} legacy head/hand motor names in the calibration file")
 
     @property
     def _hand_closure(self) -> bool:

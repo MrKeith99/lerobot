@@ -32,7 +32,7 @@ def test_key_counts():
     assert len(j.ARM_MODE_ACTION_KEYS) == 36
     assert len(j.TELEOP_ACTION_KEYS) == 69
     assert len(j.HEAD_HAND_KEYS) == 18
-    assert j.HAND_CLOSURE_KEYS == ("left_hand.closure", "right_hand.closure")
+    assert j.HAND_CLOSURE_KEYS == ("kLeftHand.closure", "kRightHand.closure")
     assert len(j.CLOSURE_ACTION_KEYS) == 33
     assert len(j.CLOSURE_ARM_MODE_ACTION_KEYS) == 22
 
@@ -46,13 +46,30 @@ def test_body_and_arm_keys_match_stock_unitree_g1():
 
 def test_extras_are_appended_after_stock_columns():
     stock_controller_action = j.ARM_KEYS + j.REMOTE_AXES
-    assert j.CLOSURE_ACTION_KEYS == j.BODY_KEYS + j.HEAD_KEYS + ("left_hand.closure", "right_hand.closure")
+    assert j.CLOSURE_ACTION_KEYS == j.BODY_KEYS + j.HEAD_KEYS + ("kLeftHand.closure", "kRightHand.closure")
     assert j.ALL_ACTION_KEYS[:29] == j.BODY_KEYS
     assert j.CLOSURE_ARM_MODE_ACTION_KEYS[:18] == stock_controller_action
     assert j.ARM_MODE_ACTION_KEYS[:18] == stock_controller_action
     assert j.CLOSURE_ARM_MODE_ACTION_KEYS[18:] == j.HEAD_KEYS + j.HAND_CLOSURE_KEYS
     assert set(j.CLOSURE_ACTION_KEYS) <= set(j.TELEOP_ACTION_KEYS)
     assert set(j.CLOSURE_ARM_MODE_ACTION_KEYS) <= set(j.TELEOP_ACTION_KEYS)
+
+
+def test_head_and_hand_names_follow_unitree_convention():
+    assert j.HEAD_KEYS == ("kHeadYaw.q", "kHeadPitch.q")
+    assert j.HAND_CLOSURE_KEYS == ("kLeftHand.closure", "kRightHand.closure")
+    assert j.hand_motor_names("left") == tuple(f"kLeftHandMotor{i}" for i in range(11, 19))
+    assert j.hand_motor_names("right") == tuple(f"kRightHandMotor{i}" for i in range(1, 9))
+    for name, (motor_id, _model) in j.HAND_MOTORS.items():
+        assert name.endswith(f"Motor{motor_id}")
+
+
+def test_legacy_motor_names_map_onto_every_current_motor():
+    assert set(j.LEGACY_MOTOR_NAMES.values()) == set(j.HEAD_HAND_MOTORS)
+    assert j.LEGACY_MOTOR_NAMES["xl330_joint"] == "kHeadYaw"
+    assert j.LEGACY_MOTOR_NAMES["d455_joint"] == "kHeadPitch"
+    assert j.LEGACY_MOTOR_NAMES["left_hand_finger1_motor1"] == "kLeftHandMotor11"
+    assert j.LEGACY_MOTOR_NAMES["right_hand_finger4_motor2"] == "kRightHandMotor8"
 
 
 def test_hand_closure_key_rejects_unknown_side():

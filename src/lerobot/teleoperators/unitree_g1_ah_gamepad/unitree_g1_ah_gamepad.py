@@ -19,7 +19,7 @@
 Emits every key in `TELEOP_ACTION_KEYS` on every `get_action()` call: held body/hand
 poses (taken from the robot's first observation via `send_feedback`, else `default_action()`),
 D-pad-driven head targets, an RB/LB-blended hand open/close (per-servo targets plus
-`{side}_hand.closure` in [0, 1]), the 4 `REMOTE_AXES` driven by the sticks and the 16
+`k{Side}Hand.closure` in [0, 1]), the 4 `REMOTE_AXES` driven by the sticks and the 16
 `REMOTE_BUTTONS`, of which the L2/R2 triggers drive the locomotion controller's waist
 raise/lower slots. All motion is time-based (rad/s, blend/s) so behaviour does not depend on
 the calling loop's fps.
@@ -153,13 +153,14 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
 
     def _step_head(self, dt: float) -> None:
         hx, hy = self.gamepad.hat()
-        pan = self._target["xl330_joint.q"] - hx * self.config.head_speed_rad_s * dt
+        yaw_key, pitch_key = HEAD_KEYS
+        pan = self._target[yaw_key] - hx * self.config.head_speed_rad_s * dt
         tilt_sign = -1.0 if self.config.invert_tilt else 1.0
-        tilt = self._target["d455_joint.q"] + tilt_sign * hy * self.config.head_speed_rad_s * dt
-        pan_lo, pan_hi = HEAD_LIMITS_RAD["xl330_joint"]
-        tilt_lo, tilt_hi = HEAD_LIMITS_RAD["d455_joint"]
-        self._target["xl330_joint.q"] = min(max(pan, pan_lo), pan_hi)
-        self._target["d455_joint.q"] = min(max(tilt, tilt_lo), tilt_hi)
+        tilt = self._target[pitch_key] + tilt_sign * hy * self.config.head_speed_rad_s * dt
+        pan_lo, pan_hi = HEAD_LIMITS_RAD["kHeadYaw"]
+        tilt_lo, tilt_hi = HEAD_LIMITS_RAD["kHeadPitch"]
+        self._target[yaw_key] = min(max(pan, pan_lo), pan_hi)
+        self._target[pitch_key] = min(max(tilt, tilt_lo), tilt_hi)
 
     def _step_hands(self, dt: float) -> None:
         pressed = {

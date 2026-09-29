@@ -186,6 +186,31 @@ _MODE_KEYS = {
 }
 
 
+class TestG1AhLegacyCalibration:
+    def test_legacy_motor_names_are_migrated_on_load(self, headhand_server, tmp_path):
+        import json
+
+        from lerobot.robots.unitree_g1_ah.g1_ah_joints import LEGACY_MOTOR_NAMES
+
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            robot = _new_robot(headhand_server, mocks, tmp_path)
+            legacy = {old: robot.calibration[new] for old, new in LEGACY_MOTOR_NAMES.items()}
+            robot.calibration = legacy
+            robot._save_calibration()
+
+            robot._load_calibration()
+
+            assert set(robot.calibration) == set(HEAD_HAND_MOTORS)
+            assert robot.calibration["kHeadYaw"] == legacy["xl330_joint"]
+            assert robot.calibration["kLeftHandMotor11"] == legacy["left_hand_finger1_motor1"]
+            on_disk = json.loads(robot.calibration_fpath.read_text())
+            assert set(on_disk) == set(HEAD_HAND_MOTORS)
+
+
 class TestG1AhFeatures:
     def test_default_hand_representation_is_closure(self, g1ah_robot):
         robot, _ = g1ah_robot
@@ -263,7 +288,7 @@ class TestG1AhHandClosure:
         robot, _ = g1ah_robot
         robot.connect(calibrate=False)
         headhand_server.received.clear()
-        sent = robot.send_action({"right_hand.closure": closure})
+        sent = robot.send_action({"kRightHand.closure": closure})
 
         names = hand_motor_names("right")
         goal_ticks = _latest_goal_ticks(headhand_server, names)
@@ -274,14 +299,14 @@ class TestG1AhHandClosure:
         ]
         assert [goal_ticks[name] for name in names] == expected
         assert not any(name in goal_ticks for name in hand_motor_names("left"))
-        assert sent["right_hand.closure"] == pytest.approx(closure)
+        assert sent["kRightHand.closure"] == pytest.approx(closure)
 
     def test_closure_is_clipped(self, g1ah_robot):
         robot, _ = g1ah_robot
         robot.connect(calibrate=False)
-        sent = robot.send_action({"left_hand.closure": 1.7, "right_hand.closure": -0.3})
-        assert sent["left_hand.closure"] == 1.0
-        assert sent["right_hand.closure"] == 0.0
+        sent = robot.send_action({"kLeftHand.closure": 1.7, "kRightHand.closure": -0.3})
+        assert sent["kLeftHand.closure"] == 1.0
+        assert sent["kRightHand.closure"] == 0.0
         assert [sent[f"{name}.q"] for name in hand_motor_names("left")] == pytest.approx(
             closure_to_hand_q("left", 1.0), abs=1e-6
         )
@@ -290,7 +315,7 @@ class TestG1AhHandClosure:
         robot, _ = g1ah_robot
         robot.connect(calibrate=False)
         action = dict.fromkeys((f"{name}.q" for name in hand_motor_names("right")), 0.0)
-        action["right_hand.closure"] = 1.0
+        action["kRightHand.closure"] = 1.0
         sent = robot.send_action(action)
         assert [sent[f"{name}.q"] for name in hand_motor_names("right")] == pytest.approx(
             closure_to_hand_q("right", 1.0), abs=1e-6
@@ -301,7 +326,7 @@ class TestG1AhHandClosure:
         robot, _ = g1ah_robot
         robot.connect(calibrate=False)
         robot.send_action(dict.fromkeys(HAND_CLOSURE_KEYS, closure))
-        obs = _wait_for_observation(robot, "left_hand.closure", closure)
+        obs = _wait_for_observation(robot, "kLeftHand.closure", closure)
         for key in HAND_CLOSURE_KEYS:
             assert obs[key] == pytest.approx(closure, abs=0.02)
             assert 0.0 <= obs[key] <= 1.0
@@ -317,7 +342,7 @@ class TestG1AhHandClosure:
             )
             robot.connect(calibrate=False)
             try:
-                sent = robot.send_action({"right_hand.closure": 1.0})
+                sent = robot.send_action({"kRightHand.closure": 1.0})
                 assert not any(f"{name}.q" in sent for name in hand_motor_names("right"))
                 assert not any(key in robot.get_observation() for key in HAND_CLOSURE_KEYS)
             finally:
@@ -345,13 +370,12 @@ class TestG1AhConnect:
             assert f"{name}.q" in obs
 
     def test_missing_body_slots_are_recorded_as_zero(self, g1ah_robot):
-        from lerobot.robots.unitree_g1_ah.g1_ah_joints import INVALID_BODY_KEYS
+        from lerobot.robots.unitree_g1_ah.g1_ah_joints import BODY_KEYS, INVALID_BODY_KEYS
 
         robot, _ = g1ah_robot
         robot.connect(calibrate=False)
         obs = robot.get_observation()
-        body_keys = [key for key in robot.observation_features if key.startswith("k")]
-        assert len(body_keys) == 29
+        assert list(robot.observation_features)[:29] == list(BODY_KEYS)
         for key in INVALID_BODY_KEYS:
             assert obs[key] == 0.0
         assert obs["kLeftElbow.q"] != 0.0
@@ -370,7 +394,7 @@ class TestG1AhConnect:
         robot, _ = g1ah_robot
         robot.connect(calibrate=False)
         action = dict.fromkeys(robot.action_features, 0.0)
-        action["xl330_joint.q"] = 5.0
+        action["kHeadYaw.q"] = 5.0
         robot.send_action(action)
 
         import time
@@ -380,13 +404,13 @@ class TestG1AhConnect:
         while time.time() < deadline and found is None:
             for cmd in headhand_server.received:
                 goal_ticks = cmd.get("goal_ticks")
-                if goal_ticks and "xl330_joint" in goal_ticks:
-                    found = goal_ticks["xl330_joint"]
+                if goal_ticks and "kHeadYaw" in goal_ticks:
+                    found = goal_ticks["kHeadYaw"]
                     break
             time.sleep(0.01)
 
         assert found is not None
-        calib = robot.calibration["xl330_joint"]
+        calib = robot.calibration["kHeadYaw"]
         from lerobot.robots.unitree_g1_ah.g1_ah_devices import rad_to_ticks
 
         expected = rad_to_ticks("xl330-m288", 0.7, calib)

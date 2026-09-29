@@ -129,9 +129,9 @@ def test_triggers_drive_waist_buttons_not_hands(teleop):
     action = teleop.get_action()
     assert action["remote.button.0"] == 1.0
     assert action["remote.button.4"] == 0.0
-    for key in default:
-        if "hand" in key:
-            assert action[key] == pytest.approx(default[key])
+    for side in ("left", "right"):
+        for name in hand_motor_names(side):
+            assert action[f"{name}.q"] == pytest.approx(default[f"{name}.q"])
 
     teleop.gamepad.axes[layout.trigger_left] = -1.0
     teleop.gamepad.axes[layout.trigger_right] = 1.0
@@ -158,10 +158,10 @@ def test_hat_up_tilts_and_saturates(teleop):
             clock["t"] += 0.05
             action = teleop.get_action()
             if first_tilt is None:
-                first_tilt = action["d455_joint.q"]
+                first_tilt = action["kHeadPitch.q"]
         assert first_tilt is not None
         assert first_tilt > 0.0
-        assert action["d455_joint.q"] == pytest.approx(0.8, abs=1e-6)
+        assert action["kHeadPitch.q"] == pytest.approx(0.8, abs=1e-6)
 
 
 def test_hat_pan_saturates_both_directions(teleop):
@@ -173,14 +173,14 @@ def test_hat_pan_saturates_both_directions(teleop):
         for _ in range(200):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["xl330_joint.q"] == pytest.approx(-0.7, abs=1e-6)
+        assert action["kHeadYaw.q"] == pytest.approx(-0.7, abs=1e-6)
 
         teleop.gamepad.buttons.discard(layout.dpad_right)
         teleop.gamepad.buttons.add(layout.dpad_left)
         for _ in range(400):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["xl330_joint.q"] == pytest.approx(0.7, abs=1e-6)
+        assert action["kHeadYaw.q"] == pytest.approx(0.7, abs=1e-6)
 
 
 def test_rb_closes_right_hand_only(teleop):
@@ -197,17 +197,16 @@ def test_rb_closes_right_hand_only(teleop):
 
         closed_right = hand_pose_rad("right", True)
         for name, expected in zip(
-            (f"right_hand_finger{i}_motor{j}" for i in range(1, 5) for j in range(1, 3)),
+            hand_motor_names("right"),
             closed_right,
             strict=True,
         ):
             assert action[f"{name}.q"] == pytest.approx(expected, abs=1e-3)
 
         default = default_action()
-        for i in range(1, 5):
-            for j in range(1, 3):
-                key = f"left_hand_finger{i}_motor{j}.q"
-                assert action[key] == pytest.approx(default[key])
+        for name in hand_motor_names("left"):
+            key = f"{name}.q"
+            assert action[key] == pytest.approx(default[key])
 
 
 def test_rb_release_returns_to_open(teleop):
@@ -225,7 +224,7 @@ def test_rb_release_returns_to_open(teleop):
 
         open_right = hand_pose_rad("right", False)
         for name, expected in zip(
-            (f"right_hand_finger{i}_motor{j}" for i in range(1, 5) for j in range(1, 3)),
+            hand_motor_names("right"),
             open_right,
             strict=True,
         ):
@@ -247,11 +246,11 @@ def test_rb_ramps_right_closure_at_blend_rate(teleop):
     with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
         teleop.get_action()
         half = _hold(teleop, clock, teleop.config.layout.button_rb, 0.5 / rate)
-        assert half["right_hand.closure"] == pytest.approx(0.5, abs=1e-6)
-        assert half["left_hand.closure"] == 0.0
+        assert half["kRightHand.closure"] == pytest.approx(0.5, abs=1e-6)
+        assert half["kLeftHand.closure"] == 0.0
         full = _hold(teleop, clock, None, 1.0 / rate)
-        assert full["right_hand.closure"] == pytest.approx(1.0)
-        assert full["left_hand.closure"] == 0.0
+        assert full["kRightHand.closure"] == pytest.approx(1.0)
+        assert full["kLeftHand.closure"] == 0.0
 
 
 @pytest.mark.parametrize("side", ["left", "right"])
@@ -264,7 +263,7 @@ def test_closure_matches_per_motor_targets(teleop, side):
         for _ in range(40):
             clock["t"] += 0.01
             action = teleop.get_action()
-            closure = action[f"{side}_hand.closure"]
+            closure = action[f"k{side.capitalize()}Hand.closure"]
             assert 0.0 <= closure <= 1.0
             motors = [action[f"{name}.q"] for name in hand_motor_names(side)]
             assert motors == pytest.approx(closure_to_hand_q(side, closure), abs=1e-9)
@@ -276,24 +275,24 @@ def test_lb_release_returns_left_closure_to_zero(teleop):
     with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
         teleop.get_action()
         closed = _hold(teleop, clock, teleop.config.layout.button_lb, 1.0 / rate)
-        assert closed["left_hand.closure"] == pytest.approx(1.0)
+        assert closed["kLeftHand.closure"] == pytest.approx(1.0)
         teleop.gamepad.buttons.discard(teleop.config.layout.button_lb)
         released = _hold(teleop, clock, None, 1.0 / rate)
-        assert released["left_hand.closure"] == pytest.approx(0.0)
+        assert released["kLeftHand.closure"] == pytest.approx(0.0)
 
 
 def test_initial_closure_seeds_hand_blend():
     with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
         t = UnitreeG1AhGamepadTeleop(
             UnitreeG1AhGamepadTeleopConfig(
-                initial_positions={"left_hand.closure": 1.0, "right_hand.closure": 0.25}
+                initial_positions={"kLeftHand.closure": 1.0, "kRightHand.closure": 0.25}
             )
         )
         t.connect()
         action = t.get_action()
         t.disconnect()
-    assert action["left_hand.closure"] == pytest.approx(1.0)
-    assert action["right_hand.closure"] == pytest.approx(0.25)
+    assert action["kLeftHand.closure"] == pytest.approx(1.0)
+    assert action["kRightHand.closure"] == pytest.approx(0.25)
     assert [action[f"{name}.q"] for name in hand_motor_names("left")] == pytest.approx(
         hand_pose_rad("left", True)
     )
@@ -301,7 +300,7 @@ def test_initial_closure_seeds_hand_blend():
 
 def _measured_obs(hand_closure=0.3):
     obs = {key: 0.05 * (i + 1) for i, key in enumerate(BODY_KEYS)}
-    obs.update({"xl330_joint.q": 0.2, "d455_joint.q": -0.3})
+    obs.update({"kHeadYaw.q": 0.2, "kHeadPitch.q": -0.3})
     for side in ("left", "right"):
         obs.update(
             zip(
@@ -320,7 +319,7 @@ def test_first_feedback_sets_targets_to_measured_pose(teleop):
     for key in (*BODY_KEYS, *HEAD_KEYS):
         assert action[key] == pytest.approx(obs[key])
     for side in ("left", "right"):
-        assert action[f"{side}_hand.closure"] == pytest.approx(0.3)
+        assert action[f"k{side.capitalize()}Hand.closure"] == pytest.approx(0.3)
         assert [action[f"{name}.q"] for name in hand_motor_names(side)] == pytest.approx(
             closure_to_hand_q(side, 0.3)
         )
@@ -328,9 +327,9 @@ def test_first_feedback_sets_targets_to_measured_pose(teleop):
 
 def test_feedback_closure_keys_take_precedence_over_motor_angles(teleop):
     obs = _measured_obs(hand_closure=0.3)
-    obs["right_hand.closure"] = 0.8
+    obs["kRightHand.closure"] = 0.8
     teleop.send_feedback(obs)
-    assert teleop.get_action()["right_hand.closure"] == pytest.approx(0.8)
+    assert teleop.get_action()["kRightHand.closure"] == pytest.approx(0.8)
 
 
 def test_feedback_is_latched_once(teleop):
@@ -352,15 +351,15 @@ def test_feedback_without_full_body_is_ignored(teleop):
 def test_initial_positions_win_over_feedback():
     with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
         t = UnitreeG1AhGamepadTeleop(
-            UnitreeG1AhGamepadTeleopConfig(initial_positions={"kLeftElbow.q": 0.5, "left_hand.closure": 1.0})
+            UnitreeG1AhGamepadTeleopConfig(initial_positions={"kLeftElbow.q": 0.5, "kLeftHand.closure": 1.0})
         )
         t.connect()
         t.send_feedback(_measured_obs(hand_closure=0.3))
         action = t.get_action()
         t.disconnect()
     assert action["kLeftElbow.q"] == 0.5
-    assert action["left_hand.closure"] == pytest.approx(1.0)
-    assert action["right_hand.closure"] == pytest.approx(0.3)
+    assert action["kLeftHand.closure"] == pytest.approx(1.0)
+    assert action["kRightHand.closure"] == pytest.approx(0.3)
     assert action["kRightElbow.q"] == pytest.approx(_measured_obs()["kRightElbow.q"])
 
 
@@ -373,14 +372,13 @@ def test_dpad_moves_head_from_measured_pose(teleop):
         teleop.gamepad.buttons.add(teleop.config.layout.dpad_up)
         clock["t"] += 0.1
         action = teleop.get_action()
-    assert action["d455_joint.q"] == pytest.approx(obs["d455_joint.q"] + teleop.config.head_speed_rad_s * 0.1)
-    assert action["xl330_joint.q"] == pytest.approx(obs["xl330_joint.q"])
+    assert action["kHeadPitch.q"] == pytest.approx(obs["kHeadPitch.q"] + teleop.config.head_speed_rad_s * 0.1)
+    assert action["kHeadYaw.q"] == pytest.approx(obs["kHeadYaw.q"])
 
 
 def test_body_keys_never_change(teleop):
     default = default_action()
-    body_keys = [k for k in default if k.endswith(".q") and not k.startswith(("xl330", "d455"))]
-    body_keys = [k for k in body_keys if "hand" not in k]
+    body_keys = list(BODY_KEYS)
 
     layout = teleop.config.layout
     clock = {"t": 0.0}
@@ -425,12 +423,12 @@ def test_emit_remote_axes_false_zeros_out():
 
 
 def test_initial_positions_override_applied():
-    cfg = UnitreeG1AhGamepadTeleopConfig(initial_positions={"xl330_joint.q": 0.3})
+    cfg = UnitreeG1AhGamepadTeleopConfig(initial_positions={"kHeadYaw.q": 0.3})
     with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
         t = UnitreeG1AhGamepadTeleop(cfg)
         t.connect()
         action = t.get_action()
-        assert action["xl330_joint.q"] == pytest.approx(0.3)
+        assert action["kHeadYaw.q"] == pytest.approx(0.3)
         t.disconnect()
 
 
@@ -519,7 +517,7 @@ def test_dpad_buttons_tilt_same_as_hat(teleop):
         for _ in range(200):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["d455_joint.q"] == pytest.approx(0.8, abs=1e-6)
+        assert action["kHeadPitch.q"] == pytest.approx(0.8, abs=1e-6)
 
 
 class _FakeJoystick:

@@ -177,8 +177,8 @@ class TestG1AhRecordLoopIntegration:
                         act = teleop.get_action()
                         robot.send_action(act)
                         frame = build_dataset_frame(ds_features, act, ACTION)[ACTION]
-                        closures.append(float(frame[names.index("right_hand.closure")]))
-                        assert frame[names.index("left_hand.closure")] == 0.0
+                        closures.append(float(frame[names.index("kRightHand.closure")]))
+                        assert frame[names.index("kLeftHand.closure")] == 0.0
 
                 assert closures == sorted(closures)
                 assert closures[0] == pytest.approx(teleop.config.hand_blend_per_s * 0.05)
@@ -188,13 +188,13 @@ class TestG1AhRecordLoopIntegration:
 
                 deadline = time.time() + 2.0
                 obs = robot.get_observation()
-                while time.time() < deadline and obs.get("right_hand.closure", 0.0) < 0.98:
+                while time.time() < deadline and obs.get("kRightHand.closure", 0.0) < 0.98:
                     time.sleep(0.02)
                     obs = robot.get_observation()
                 obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)["observation.state"]
                 obs_names = ds_features["observation.state"]["names"]
-                assert obs_frame[obs_names.index("right_hand.closure")] == pytest.approx(1.0, abs=0.02)
-                assert obs_frame[obs_names.index("left_hand.closure")] == pytest.approx(0.0, abs=0.02)
+                assert obs_frame[obs_names.index("kRightHand.closure")] == pytest.approx(1.0, abs=0.02)
+                assert obs_frame[obs_names.index("kLeftHand.closure")] == pytest.approx(0.0, abs=0.02)
             finally:
                 robot.disconnect()
 

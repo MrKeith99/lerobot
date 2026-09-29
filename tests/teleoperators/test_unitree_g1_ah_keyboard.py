@@ -24,7 +24,12 @@ from unittest.mock import patch
 import pytest
 
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_KEYS
-from lerobot.robots.unitree_g1_ah.g1_ah_joints import TELEOP_ACTION_KEYS, default_action, hand_pose_rad
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
+    TELEOP_ACTION_KEYS,
+    default_action,
+    hand_motor_names,
+    hand_pose_rad,
+)
 from lerobot.teleoperators.unitree_g1_ah_keyboard import (
     UnitreeG1AhKeyboardTeleop,
     UnitreeG1AhKeyboardTeleopConfig,
@@ -228,14 +233,14 @@ def test_arrow_keys_move_head_same_sign_as_gamepad(teleop):
         for _ in range(200):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["d455_joint.q"] == pytest.approx(0.8, abs=1e-6)
+        assert action["kHeadPitch.q"] == pytest.approx(0.8, abs=1e-6)
         teleop.gamepad.release("up")
 
         teleop.gamepad.press("left")
         for _ in range(400):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["xl330_joint.q"] == pytest.approx(0.7, abs=1e-6)
+        assert action["kHeadYaw.q"] == pytest.approx(0.7, abs=1e-6)
 
 
 def test_e_held_closes_right_hand(teleop):
@@ -252,19 +257,18 @@ def test_e_held_closes_right_hand(teleop):
 
         closed_right = hand_pose_rad("right", True)
         for name, expected in zip(
-            (f"right_hand_finger{i}_motor{j}" for i in range(1, 5) for j in range(1, 3)),
+            hand_motor_names("right"),
             closed_right,
             strict=True,
         ):
             assert action[f"{name}.q"] == pytest.approx(expected, abs=1e-3)
-        assert action["right_hand.closure"] == pytest.approx(1.0, abs=1e-3)
-        assert action["left_hand.closure"] == 0.0
+        assert action["kRightHand.closure"] == pytest.approx(1.0, abs=1e-3)
+        assert action["kLeftHand.closure"] == 0.0
 
         default = default_action()
-        for i in range(1, 5):
-            for j in range(1, 3):
-                key = f"left_hand_finger{i}_motor{j}.q"
-                assert action[key] == pytest.approx(default[key])
+        for name in hand_motor_names("left"):
+            key = f"{name}.q"
+            assert action[key] == pytest.approx(default[key])
 
 
 def test_w_gives_positive_remote_ly(teleop):

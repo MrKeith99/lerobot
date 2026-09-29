@@ -133,10 +133,10 @@ class TestG1AhDatasetFeatures:
     def test_build_closure_dataset_frame_with_teleop_keys(self):
         ds_features = hw_to_dataset_features(dict.fromkeys(CLOSURE_ACTION_KEYS, float), "action")
         values = dict.fromkeys(TELEOP_ACTION_KEYS, 0.0)
-        values["right_hand.closure"] = 0.75
+        values["kRightHand.closure"] = 0.75
         frame = build_dataset_frame(ds_features, values, "action")
         assert frame["action"].shape == (33,)
-        assert frame["action"][ds_features["action"]["names"].index("right_hand.closure")] == 0.75
+        assert frame["action"][ds_features["action"]["names"].index("kRightHand.closure")] == 0.75
 
 
 class TestG1AhDeviceClassFallback:

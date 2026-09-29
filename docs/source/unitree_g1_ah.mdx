@@ -62,29 +62,43 @@ stock `unitree_g1` dataset.
 
 ### Head (2)
 
-| Lerobot key     | Motor                   | Model      |
-| --------------- | ----------------------- | ---------- |
-| `xl330_joint.q` | pan                     | xl330-m288 |
-| `d455_joint.q`  | tilt (carries the D455) | xl330-m288 |
+| Lerobot key    | Motor                   | ID  | Model      | MuJoCo joint       |
+| -------------- | ----------------------- | --- | ---------- | ------------------ |
+| `kHeadYaw.q`   | pan                     | 1   | xl330-m288 | `head_yaw_joint`   |
+| `kHeadPitch.q` | tilt (carries the D455) | 2   | xl330-m288 | `head_pitch_joint` |
 
 ### Left hand (8)
 
-`left_hand_finger1_motor1.q` … `left_hand_finger4_motor2.q` (finger 1 = index, 2 = middle,
-3 = ring, 4 = thumb; motor 1/2 = the two joints per finger). Feetech SCS0009, protocol 1,
-motor IDs 11–18.
+`kLeftHandMotor11.q` … `kLeftHandMotor18.q`, named by motor ID (Feetech SCS0009, protocol 1).
+IDs 11–12 are the index finger's two servos, 13–14 middle, 15–16 ring, 17–18 thumb. MuJoCo
+joints: `left_hand_motor11_joint` … `left_hand_motor18_joint`.
 
 ### Right hand (8)
 
-`right_hand_finger1_motor1.q` … `right_hand_finger4_motor2.q`, same layout, motor IDs 1–8.
+`kRightHandMotor1.q` … `kRightHandMotor8.q`, same layout with motor IDs 1–8 (1–2 index … 7–8
+thumb). MuJoCo joints: `right_hand_motor1_joint` … `right_hand_motor8_joint`.
+
+### Naming
+
+Every key follows the Unitree SDK style of the body (`k` + CamelCase):
+
+- `.q` is a joint position in rad;
+- `.closure` is a hand closure in [0, 1].
+
+The same names are used for the head/hand ZMQ bridge messages and the calibration file. The
+MuJoCo model uses the matching snake_case joint names, in the same style as the G1's own
+(`kHeadYaw` ↔ `head_yaw_joint`, like `kLeftHipPitch` ↔ `left_hip_pitch_joint`). Calibration
+files written with the earlier names (`xl330_joint`, `d455_joint`,
+`{side}_hand_finger{i}_motor{j}`) are renamed automatically the first time they are loaded.
 
 ### Hand representation
 
 `--robot.hand_representation` chooses how the hands appear in `action` and `observation.state`:
 
-| Value               | Hand keys                                        | No controller | With a locomotion controller |
-| ------------------- | ------------------------------------------------ | ------------- | ---------------------------- |
-| `closure` (default) | `left_hand.closure`, `right_hand.closure`        | 33 / 33       | 22 / 33                      |
-| `per_motor`         | the 16 `{side}_hand_finger{i}_motor{j}.q` servos | 47 / 47       | 36 / 47                      |
+| Value               | Hand keys                                    | No controller | With a locomotion controller |
+| ------------------- | -------------------------------------------- | ------------- | ---------------------------- |
+| `closure` (default) | `kLeftHand.closure`, `kRightHand.closure`    | 33 / 33       | 22 / 33                      |
+| `per_motor`         | the 16 `k{Left,Right}HandMotor{id}.q` servos | 47 / 47       | 36 / 47                      |
 
 (Counts are `action` / `observation.state`.) Closure is a value in [0, 1]: 0 = open, 1 = closed.
 
@@ -206,8 +220,8 @@ Expected output — head motor IDs 1 and 2 report model `1200` (XL330-M288), han
 1–8 and 11–18 report model `1284` (SCS0009):
 
 ```
-{'xl330_joint': 1200, 'd455_joint': 1200,
- 'right_hand_finger1_motor1': 1284, ..., 'left_hand_finger4_motor2': 1284}
+{'kHeadYaw': 1200, 'kHeadPitch': 1200,
+ 'kRightHandMotor1': 1284, ..., 'kLeftHandMotor18': 1284}
 ```
 
 A `None` value for any motor means it didn't respond to a ping — check wiring and the ID
@@ -348,7 +362,7 @@ chosen keys to fixed values instead.
 | ----------------------- | ---------------------------------------------------------------------------------------------- |
 | D-pad left/right        | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s)                                          |
 | D-pad up/down           | Head tilt (invert with `--teleop.invert_tilt=true`)                                            |
-| R1 (RB on Xbox)         | Hold to close the right hand (`right_hand.closure` 0 → 1 at `hand_blend_per_s`, default 2.0/s) |
+| R1 (RB on Xbox)         | Hold to close the right hand (`kRightHand.closure` 0 → 1 at `hand_blend_per_s`, default 2.0/s) |
 | L1 (LB on Xbox)         | Hold to close the left hand                                                                    |
 | L2 / R2 (LT / RT)       | Hold to raise / lower the waist (`GrootLocomotionController` only)                             |
 | Left stick              | `remote.lx` / `remote.ly` (locomotion command, if a controller is attached)                    |
@@ -410,7 +424,7 @@ lerobot-teleoperate \
 | ---------------- | ---------------------------------------------------------------------------------------------- |
 | Arrow left/right | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s)                                          |
 | Arrow up/down    | Head tilt (invert with `--teleop.invert_tilt=true`)                                            |
-| `e`              | Hold to close the right hand (`right_hand.closure` 0 → 1 at `hand_blend_per_s`, default 2.0/s) |
+| `e`              | Hold to close the right hand (`kRightHand.closure` 0 → 1 at `hand_blend_per_s`, default 2.0/s) |
 | `q`              | Hold to close the left hand                                                                    |
 | `w` / `s`        | `remote.ly` (locomotion command, if a controller is attached)                                  |
 | `a` / `d`        | `remote.lx`                                                                                    |
