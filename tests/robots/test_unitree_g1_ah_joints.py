@@ -30,7 +30,7 @@ def test_key_counts():
     assert len(j.HAND_KEYS) == 16
     assert len(j.ALL_ACTION_KEYS) == 47
     assert len(j.ARM_MODE_ACTION_KEYS) == 36
-    assert len(j.TELEOP_ACTION_KEYS) == 69
+    assert len(j.TELEOP_ACTION_KEYS) == 70
     assert len(j.HEAD_HAND_KEYS) == 18
     assert j.HAND_CLOSURE_KEYS == ("kLeftHand.closure", "kRightHand.closure")
     assert len(j.CLOSURE_ACTION_KEYS) == 33
@@ -152,6 +152,8 @@ def test_keys_have_no_slash_and_end_with_q_except_remote_and_closure():
         assert "/" not in key
         if key in j.HAND_CLOSURE_KEYS:
             assert key.endswith(".closure")
+        elif key == "kBaseHeight.cmd":
+            continue
         elif key not in j.REMOTE_KEYS:
             assert key.endswith(".q")
 

@@ -97,8 +97,8 @@ files written with the earlier names (`xl330_joint`, `d455_joint`,
 
 | Value               | Hand keys                                    | No controller | With a locomotion controller |
 | ------------------- | -------------------------------------------- | ------------- | ---------------------------- |
-| `closure` (default) | `kLeftHand.closure`, `kRightHand.closure`    | 33 / 33       | 22 / 33                      |
-| `per_motor`         | the 16 `k{Left,Right}HandMotor{id}.q` servos | 47 / 47       | 36 / 47                      |
+| `closure` (default) | `kLeftHand.closure`, `kRightHand.closure`    | 33 / 33       | 23 / 33                      |
+| `per_motor`         | the 16 `k{Left,Right}HandMotor{id}.q` servos | 47 / 47       | 37 / 47                      |
 
 (Counts are `action` / `observation.state`.) Closure is a value in [0, 1]: 0 = open, 1 = closed.
 
@@ -389,15 +389,18 @@ python -m lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input --seconds 30
 
 Pass `--robot.controller=HolosomaLocomotionController` or `--robot.controller=GrootLocomotionController`
 to drive the legs with a learned locomotion policy while the gamepad controls arms/head/hands.
-With GR00T, holding L2 / R2 raises / lowers the commanded base height (0.50–1.00 m); the teleop
-forwards the triggers as `remote.button.0` / `remote.button.4`, the slots GR00T reads as R1 / R2 on
-the Unitree wireless remote (R1 itself is the hand button here). Both are 29dof-trained policies
+With GR00T, holding L2 / R2 raises / lowers the commanded base height at 0.05 m/s (default 0.74 m,
+range 0.50–1.00 m). The teleop integrates the triggers into the absolute command
+`kBaseHeight.cmd`, which is recorded as the **last action column** and sent to the controller.
+Disable it with `--robot.base_height_action=false`; the triggers then act only as
+`remote.button.0` / `remote.button.4`, the slots GR00T reads as R1 / R2 on the Unitree wireless
+remote (R1 itself is the hand button here). Both are 29dof-trained policies
 running on the 23dof UnitreeG1Ah body — GR00T's waist roll/pitch outputs land on slots the 23dof
 lacks and are dropped — **unverified on UnitreeG1Ah hardware**; use a gantry. Action features drop
 to the stock layout's 14 arm targets + `remote.lx/ly/rx/ry`, followed by head + hands, in this mode
 (the controller owns legs/waist): the 22-key `CLOSURE_ARM_MODE_ACTION_KEYS`, or the 36-key
-`ARM_MODE_ACTION_KEYS` with `hand_representation=per_motor`. `observation.state` keeps the full
-body (33 or 47 keys).
+`ARM_MODE_ACTION_KEYS` with `hand_representation=per_motor`, plus `kBaseHeight.cmd` with GR00T
+(23 or 37 keys). `observation.state` keeps the full body (33 or 47 keys).
 
 ## Teleoperate (keyboard)
 
@@ -465,12 +468,13 @@ After recording, check `meta/info.json` in the dataset:
 - `"robot_type"` should read `"unitree_g1_23dof_ah8_d455_2dof_rev_1_0"` (or the `base` variant).
 - `features["observation.state"]["shape"]` should be `[33]` (`[47]` with
   `hand_representation=per_motor`), with or without a locomotion controller.
-- `features["action"]["shape"]` should match it without a controller, and be `[22]` (`[36]` with
-  `per_motor`) with one.
+- `features["action"]["shape"]` should match it without a controller, and be `[23]` (`[37]` with
+  `per_motor`) with GR00T. That includes `kBaseHeight.cmd`; subtract 1 with
+  `--robot.base_height_action=false` or with Holosoma.
 - State names are in body (29) → head → left hand → right hand order, matching
   `CLOSURE_ACTION_KEYS` (`ALL_ACTION_KEYS` for `per_motor`) in `g1_ah_joints.py`. With a
-  controller, `action` is arms (14) → remote axes → head → hands, matching
-  `CLOSURE_ARM_MODE_ACTION_KEYS` (`ARM_MODE_ACTION_KEYS`).
+  controller, `action` is arms (14) → remote axes → head → hands → `kBaseHeight.cmd`, matching
+  `CLOSURE_ARM_MODE_ACTION_KEYS` (`ARM_MODE_ACTION_KEYS`) plus the height.
 
 ---
 

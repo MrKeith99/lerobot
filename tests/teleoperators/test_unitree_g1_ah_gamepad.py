@@ -102,7 +102,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 69
+    assert len(teleop.action_features) == 70
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -374,6 +374,41 @@ def test_dpad_moves_head_from_measured_pose(teleop):
         action = teleop.get_action()
     assert action["kHeadPitch.q"] == pytest.approx(obs["kHeadPitch.q"] + teleop.config.head_speed_rad_s * 0.1)
     assert action["kHeadYaw.q"] == pytest.approx(obs["kHeadYaw.q"])
+
+
+@pytest.mark.parametrize("trigger, sign", [("trigger_left", 1.0), ("trigger_right", -1.0)])
+def test_triggers_move_base_height(teleop, trigger, sign):
+    from lerobot.robots.unitree_g1.g1_utils import GROOT_BASE_HEIGHT_DEFAULT, GROOT_BASE_HEIGHT_RATE
+
+    clock = {"t": 0.0}
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        assert teleop.get_action()["kBaseHeight.cmd"] == pytest.approx(GROOT_BASE_HEIGHT_DEFAULT)
+        teleop.gamepad.axes[getattr(teleop.config.layout, trigger)] = 1.0
+        clock["t"] += 0.1
+        action = teleop.get_action()
+    assert action["kBaseHeight.cmd"] == pytest.approx(
+        GROOT_BASE_HEIGHT_DEFAULT + sign * 0.1 * GROOT_BASE_HEIGHT_RATE
+    )
+
+
+def test_base_height_clipped_and_seeded(teleop):
+    from lerobot.robots.unitree_g1.g1_utils import GROOT_BASE_HEIGHT_RANGE
+
+    clock = {"t": 0.0}
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        teleop.get_action()
+        teleop.gamepad.axes[teleop.config.layout.trigger_left] = 1.0
+        for _ in range(100):
+            clock["t"] += 0.1
+            action = teleop.get_action()
+    assert action["kBaseHeight.cmd"] == pytest.approx(GROOT_BASE_HEIGHT_RANGE[1])
+    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        seeded = UnitreeG1AhGamepadTeleop(
+            UnitreeG1AhGamepadTeleopConfig(initial_positions={"kBaseHeight.cmd": 0.6})
+        )
+        seeded.connect()
+        assert seeded.get_action()["kBaseHeight.cmd"] == pytest.approx(0.6)
+        seeded.disconnect()
 
 
 def test_body_keys_never_change(teleop):

@@ -201,6 +201,22 @@ lerobot-teleoperate \
 
 We support both [GrootLocomotionController](https://github.com/NVlabs/GR00T-WholeBodyControl) and [HolosomaLocomotionController](https://github.com/amazon-far/holosoma) via `--robot.controller`.
 
+### Recording the GR00T base height (optional)
+
+GR00T keeps a base-height command (default 0.74 m, range 0.50–1.00 m) that the remote's R1 / R2
+raise / lower at 0.05 m/s. By default it lives only inside the controller, so a recorded dataset
+shows the robot crouching or rising with no matching action. Pass
+`--robot.base_height_action=true` (with `--robot.controller=GrootLocomotionController` only) to
+record it:
+
+- `action` gains a last column, `kBaseHeight.cmd`, the absolute command in m (19 columns instead
+  of 18). This matches the `base_height_command` action of NVIDIA's GR00T N1.7 G1 data.
+- The `unitree_g1` teleop integrates R1 / R2 into that value.
+- The controller uses `kBaseHeight.cmd` directly instead of integrating the buttons, so a policy
+  trained on it can command the height.
+
+The option is off by default, so datasets stay column-compatible with upstream G1 datasets.
+
 ---
 
 ## Part 3: Loco-Manipulation with the Homunculus Exoskeleton

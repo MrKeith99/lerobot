@@ -27,7 +27,13 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_KEYS, G1_29_JointArmIndex, G1_29_JointIndex
+from lerobot.robots.unitree_g1.g1_utils import (
+    BASE_HEIGHT_KEY,
+    REMOTE_AXES,
+    REMOTE_KEYS,
+    G1_29_JointArmIndex,
+    G1_29_JointIndex,
+)
 
 ROBOT_TYPE_BASE = "unitree_g1_23dof_ah8_d455_2dof"
 ROBOT_TYPE_REV_1_0 = ROBOT_TYPE_BASE + "_rev_1_0"
@@ -131,7 +137,7 @@ def hand_closure_key(side: str) -> str:
 HAND_CLOSURE_KEYS: tuple[str, ...] = tuple(hand_closure_key(side) for side in HAND_SIDES)
 CLOSURE_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + HAND_CLOSURE_KEYS
 CLOSURE_ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + REMOTE_AXES + HEAD_KEYS + HAND_CLOSURE_KEYS
-TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + HAND_CLOSURE_KEYS + REMOTE_KEYS
+TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + HAND_CLOSURE_KEYS + REMOTE_KEYS + (BASE_HEIGHT_KEY,)
 INVALID_BODY_KEYS: tuple[str, ...] = tuple(
     f"{joint.name}.q" for joint in G1_29_JointIndex if joint in G1_23_INVALID_SDK_SLOTS
 )

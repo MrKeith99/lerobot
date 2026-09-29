@@ -116,9 +116,8 @@ class UnitreeG1Ah(UnitreeG1):
     def action_features(self) -> dict[str, type]:
         if self.controller is None:
             return self._motors_ft
-        return dict.fromkeys(
-            CLOSURE_ARM_MODE_ACTION_KEYS if self._hand_closure else ARM_MODE_ACTION_KEYS, float
-        )
+        keys = CLOSURE_ARM_MODE_ACTION_KEYS if self._hand_closure else ARM_MODE_ACTION_KEYS
+        return {**dict.fromkeys(keys, float), **self._base_height_features}
 
     def publish_lowcmd(
         self,

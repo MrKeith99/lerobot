@@ -28,6 +28,14 @@ REMOTE_BUTTONS = tuple(f"remote.button.{i}" for i in range(16))
 REMOTE_KEYS = REMOTE_AXES + REMOTE_BUTTONS
 
 
+# Absolute GR00T base-height command in m (the policy's height observation), recorded as an action
+# when `UnitreeG1Config.base_height_action` is on. Remote R1/R2 move it at GROOT_BASE_HEIGHT_RATE.
+BASE_HEIGHT_KEY = "kBaseHeight.cmd"
+GROOT_BASE_HEIGHT_DEFAULT = 0.74
+GROOT_BASE_HEIGHT_RANGE = (0.50, 1.00)
+GROOT_BASE_HEIGHT_RATE = 0.05  # m/s
+
+
 def default_remote_input() -> dict[str, float]:
     """Return a zeroed-out remote input dict (axes + buttons)."""
     return dict.fromkeys(REMOTE_KEYS, 0.0)

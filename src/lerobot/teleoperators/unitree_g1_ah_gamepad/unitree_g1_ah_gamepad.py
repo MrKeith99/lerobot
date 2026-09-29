@@ -32,7 +32,14 @@ from functools import cached_property
 from typing import Any
 
 from lerobot.lerobot_types import RobotAction
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS
+from lerobot.robots.unitree_g1.g1_utils import (
+    BASE_HEIGHT_KEY,
+    GROOT_BASE_HEIGHT_DEFAULT,
+    GROOT_BASE_HEIGHT_RANGE,
+    GROOT_BASE_HEIGHT_RATE,
+    REMOTE_AXES,
+    REMOTE_BUTTONS,
+)
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
     BODY_KEYS,
@@ -76,9 +83,18 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         self.config = config
         self.gamepad: UnitreeG1AhGamepadInput | None = None
 
-        self._target: dict[str, float] = {**default_action(), **dict.fromkeys(HAND_CLOSURE_KEYS, 0.0)}
+        self._target: dict[str, float] = {
+            **default_action(),
+            **dict.fromkeys(HAND_CLOSURE_KEYS, 0.0),
+            BASE_HEIGHT_KEY: GROOT_BASE_HEIGHT_DEFAULT,
+        }
         if config.initial_positions is not None:
-            invalid = set(config.initial_positions) - set(ALL_ACTION_KEYS) - set(HAND_CLOSURE_KEYS)
+            invalid = (
+                set(config.initial_positions)
+                - set(ALL_ACTION_KEYS)
+                - set(HAND_CLOSURE_KEYS)
+                - {BASE_HEIGHT_KEY}
+            )
             if invalid:
                 raise ValueError(f"Unknown initial_positions keys: {sorted(invalid)}")
             self._target.update(config.initial_positions)
@@ -192,6 +208,14 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
             "remote.ry": -self.gamepad.axis(layout.right_y),
         }
 
+    def _step_base_height(self, dt: float) -> None:
+        layout = self.config.layout
+        raise_ = self.gamepad.axis(layout.trigger_left) > 0.0
+        lower = self.gamepad.axis(layout.trigger_right) > 0.0
+        lo, hi = GROOT_BASE_HEIGHT_RANGE
+        height = self._target[BASE_HEIGHT_KEY] + GROOT_BASE_HEIGHT_RATE * dt * (raise_ - lower)
+        self._target[BASE_HEIGHT_KEY] = min(max(height, lo), hi)
+
     def _remote_buttons(self) -> dict[str, float]:
         layout = self.config.layout
         buttons = dict.fromkeys(REMOTE_BUTTONS, 0.0)
@@ -208,6 +232,7 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         self.gamepad.update()
         self._step_head(dt)
         self._step_hands(dt)
+        self._step_base_height(dt)
 
         return {**self._target, **self._remote_axes(), **self._remote_buttons()}
 

@@ -33,6 +33,7 @@ from ..robot import Robot
 from .config_unitree_g1 import UnitreeG1Config
 from .g1_kinematics import G1_29_ArmIK
 from .g1_utils import (
+    BASE_HEIGHT_KEY,
     REMOTE_AXES,
     REMOTE_KEYS,
     G1_29_JointArmIndex,
@@ -303,7 +304,15 @@ class UnitreeG1(Robot):
 
         arm_features = {f"{G1_29_JointArmIndex(motor).name}.q": float for motor in G1_29_JointArmIndex}
         remote_features = dict.fromkeys(REMOTE_AXES, float)
-        return {**arm_features, **remote_features}
+        return {**arm_features, **remote_features, **self._base_height_features}
+
+    @property
+    def _base_height_enabled(self) -> bool:
+        return self.config.base_height_action and self.config.controller == "GrootLocomotionController"
+
+    @property
+    def _base_height_features(self) -> dict[str, type]:
+        return {BASE_HEIGHT_KEY: float} if self._base_height_enabled else {}
 
     def _controller_loop(self):
         """Background thread that runs controller at policy's control_dt."""
@@ -587,6 +596,8 @@ class UnitreeG1(Robot):
             for key in REMOTE_KEYS:
                 if key in action:
                     self.controller_input[key] = action[key]
+            if self._base_height_enabled and BASE_HEIGHT_KEY in action:
+                self.controller_input[BASE_HEIGHT_KEY] = action[BASE_HEIGHT_KEY]
 
     @property
     def is_calibrated(self) -> bool:

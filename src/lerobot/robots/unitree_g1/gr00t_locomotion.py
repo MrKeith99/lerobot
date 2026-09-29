@@ -22,6 +22,10 @@ import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 
 from .g1_utils import (
+    BASE_HEIGHT_KEY,
+    GROOT_BASE_HEIGHT_DEFAULT,
+    GROOT_BASE_HEIGHT_RANGE,
+    GROOT_BASE_HEIGHT_RATE,
     REMOTE_AXES,
     REMOTE_BUTTONS,
     G1_29_JointIndex,
@@ -95,7 +99,7 @@ class GrootLocomotionController:
         self.groot_obs_single = np.zeros(86, dtype=np.float32)
         self.groot_obs_history = deque(maxlen=6)
         self.groot_obs_stacked = np.zeros(516, dtype=np.float32)
-        self.groot_height_cmd = 0.74  # Default base height
+        self.groot_height_cmd = GROOT_BASE_HEIGHT_DEFAULT
         self.groot_orientation_cmd = np.array([0.0, 0.0, 0.0], dtype=np.float32)
 
         # Input to GR00T is 6 frames (6*86D=516)
@@ -112,7 +116,7 @@ class GrootLocomotionController:
         self.groot_action[:] = 0.0
         self.groot_obs_single[:] = 0.0
         self.groot_obs_stacked[:] = 0.0
-        self.groot_height_cmd = 0.74
+        self.groot_height_cmd = GROOT_BASE_HEIGHT_DEFAULT
         self.groot_orientation_cmd[:] = 0.0
         self.groot_obs_history.clear()
         for _ in range(6):
@@ -131,13 +135,15 @@ class GrootLocomotionController:
         if lowstate is None:
             return {}
 
-        buttons = [int(action.get(k, 0)) for k in REMOTE_BUTTONS]
-        if buttons[0]:  # R1 - raise waist
-            self.groot_height_cmd += 0.001
-            self.groot_height_cmd = np.clip(self.groot_height_cmd, 0.50, 1.00)
-        if buttons[4]:  # R2 - lower waist
-            self.groot_height_cmd -= 0.001
-            self.groot_height_cmd = np.clip(self.groot_height_cmd, 0.50, 1.00)
+        if BASE_HEIGHT_KEY in action:
+            self.groot_height_cmd = float(np.clip(action[BASE_HEIGHT_KEY], *GROOT_BASE_HEIGHT_RANGE))
+        else:
+            buttons = [int(action.get(k, 0)) for k in REMOTE_BUTTONS]
+            step = GROOT_BASE_HEIGHT_RATE * CONTROL_DT
+            if buttons[0]:  # R1 - raise waist
+                self.groot_height_cmd = float(np.clip(self.groot_height_cmd + step, *GROOT_BASE_HEIGHT_RANGE))
+            if buttons[4]:  # R2 - lower waist
+                self.groot_height_cmd = float(np.clip(self.groot_height_cmd - step, *GROOT_BASE_HEIGHT_RANGE))
 
         lx, ly, rx, _ry = (action.get(k, 0.0) for k in REMOTE_AXES)
         self.cmd[0] = ly  # Forward/backward

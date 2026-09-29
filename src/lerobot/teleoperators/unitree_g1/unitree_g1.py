@@ -19,7 +19,16 @@ import time
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS, G1_29_JointArmIndex
+from lerobot.robots.unitree_g1.g1_utils import (
+    BASE_HEIGHT_KEY,
+    GROOT_BASE_HEIGHT_DEFAULT,
+    GROOT_BASE_HEIGHT_RANGE,
+    GROOT_BASE_HEIGHT_RATE,
+    REMOTE_AXES,
+    REMOTE_BUTTONS,
+    REMOTE_KEYS,
+    G1_29_JointArmIndex,
+)
 from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, TELEOPERATORS
 from lerobot.utils.import_utils import _unitree_sdk_available
 
@@ -207,10 +216,15 @@ class UnitreeG1Teleoperator(Teleoperator):
         self.ik_helper: ExoskeletonIKHelper | None = None
         self.remote_controller = RemoteController()
         self._held_arm_action: dict[str, float] | None = None
+        self._base_height = GROOT_BASE_HEIGHT_DEFAULT
+        self._last_t: float | None = None
 
     @cached_property
     def action_features(self) -> dict[str, type]:
-        remote_features = dict.fromkeys(self.remote_controller.remote_action, float)
+        remote_features = {
+            **dict.fromkeys(self.remote_controller.remote_action, float),
+            BASE_HEIGHT_KEY: float,
+        }
         if not self._arm_control_enabled:
             return remote_features
         joint_features = {f"{name}.q": float for name in self._g1_arm_joint_names}
@@ -294,7 +308,18 @@ class UnitreeG1Teleoperator(Teleoperator):
             rc.set_from_exo(right_raw, "right")
 
         rc._sync_remote_action()
-        return {**joint_action, **rc.remote_action}
+        self._step_base_height()
+        return {**joint_action, **rc.remote_action, BASE_HEIGHT_KEY: self._base_height}
+
+    def _step_base_height(self) -> None:
+        """Integrate R1 (raise) / R2 (lower) into the absolute GR00T base-height command."""
+        now = time.perf_counter()
+        dt = 0.0 if self._last_t is None else min(now - self._last_t, 0.1)
+        self._last_t = now
+        rc = self.remote_controller
+        delta = GROOT_BASE_HEIGHT_RATE * dt * (bool(rc.button[0]) - bool(rc.button[4]))
+        lo, hi = GROOT_BASE_HEIGHT_RANGE
+        self._base_height = min(max(self._base_height + delta, lo), hi)
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:
         wireless_remote = feedback.get("wireless_remote")

@@ -208,7 +208,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 69
+    assert len(teleop.action_features) == 70
 
 
 def test_get_action_keys_match_action_features(teleop):

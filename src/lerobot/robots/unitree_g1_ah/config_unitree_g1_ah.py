@@ -57,6 +57,7 @@ class UnitreeG1AhConfig(UnitreeG1Config):
     freeze_legs: bool = False
     # "closure": one value per hand in [0, 1] (0 = open, 1 = closed); "per_motor": the 8 servo angles per hand.
     hand_representation: str = "closure"
+    base_height_action: bool = True
 
     def __post_init__(self):
         super().__post_init__()

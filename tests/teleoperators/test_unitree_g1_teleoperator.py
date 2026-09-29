@@ -16,7 +16,7 @@
 
 """Tests for Unitree G1 teleoperator. Meant to be run in an environment where the Unitree SDK is installed."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,7 +25,7 @@ from lerobot.utils.import_utils import _unitree_sdk_available
 if not _unitree_sdk_available:
     pytest.skip("Unitree SDK not available", allow_module_level=True)
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_BUTTONS, REMOTE_KEYS
+from lerobot.robots.unitree_g1.g1_utils import BASE_HEIGHT_KEY, REMOTE_BUTTONS, REMOTE_KEYS
 from lerobot.teleoperators.unitree_g1.config_unitree_g1 import (
     ExoskeletonArmPortConfig,
     UnitreeG1TeleoperatorConfig,
@@ -216,7 +216,7 @@ def test_remote_only_action_features(teleop_remote_only):
     teleop = teleop_remote_only
     features = teleop.action_features
     # Remote-only: the 4 remote axes + 16 remote buttons
-    assert set(features.keys()) == set(REMOTE_KEYS)
+    assert set(features.keys()) == set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
 
 
 def test_feedback_features(teleop_remote_only):
@@ -230,7 +230,7 @@ def test_remote_only_get_action(teleop_remote_only):
     teleop = teleop_remote_only
     teleop.connect()
     action = teleop.get_action()
-    assert set(action.keys()) == set(REMOTE_KEYS)
+    assert set(action.keys()) == set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
     assert all(isinstance(v, float) for v in action.values())
 
 
@@ -257,7 +257,7 @@ def test_remote_only_holds_first_observed_arm_pose(teleop_remote_only):
     teleop.send_feedback(dict.fromkeys(arm_keys, -1.0))
 
     action = teleop.get_action()
-    assert set(action.keys()) == set(arm_keys) | set(REMOTE_KEYS)
+    assert set(action.keys()) == set(arm_keys) | set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
     assert {key: action[key] for key in arm_keys} == pytest.approx(first_pose)
 
 
@@ -265,7 +265,39 @@ def test_remote_only_ignores_partial_arm_feedback(teleop_remote_only):
     teleop = teleop_remote_only
     teleop.connect()
     teleop.send_feedback({"kLeftShoulderPitch.q": 0.5})
-    assert set(teleop.get_action().keys()) == set(REMOTE_KEYS)
+    assert set(teleop.get_action().keys()) == set(REMOTE_KEYS) | {BASE_HEIGHT_KEY}
+
+
+@pytest.mark.parametrize("button, sign", [(0, 1.0), (4, -1.0)])
+def test_remote_buttons_move_base_height(teleop_remote_only, button, sign):
+    from lerobot.robots.unitree_g1.g1_utils import GROOT_BASE_HEIGHT_DEFAULT, GROOT_BASE_HEIGHT_RATE
+
+    teleop = teleop_remote_only
+    teleop.connect()
+    clock = {"t": 0.0}
+    with patch("lerobot.teleoperators.unitree_g1.unitree_g1.time.perf_counter", lambda: clock["t"]):
+        assert teleop.get_action()[BASE_HEIGHT_KEY] == pytest.approx(GROOT_BASE_HEIGHT_DEFAULT)
+        teleop.remote_controller.button[button] = 1
+        clock["t"] += 0.1
+        action = teleop.get_action()
+    assert action[BASE_HEIGHT_KEY] == pytest.approx(
+        GROOT_BASE_HEIGHT_DEFAULT + sign * 0.1 * GROOT_BASE_HEIGHT_RATE
+    )
+
+
+def test_base_height_is_clipped(teleop_remote_only):
+    from lerobot.robots.unitree_g1.g1_utils import GROOT_BASE_HEIGHT_RANGE
+
+    teleop = teleop_remote_only
+    teleop.connect()
+    clock = {"t": 0.0}
+    with patch("lerobot.teleoperators.unitree_g1.unitree_g1.time.perf_counter", lambda: clock["t"]):
+        teleop.get_action()
+        teleop.remote_controller.button[4] = 1
+        for _ in range(200):
+            clock["t"] += 0.1
+            action = teleop.get_action()
+    assert action[BASE_HEIGHT_KEY] == pytest.approx(GROOT_BASE_HEIGHT_RANGE[0])
 
 
 def test_asymmetric_exo_ports_raises():

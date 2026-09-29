@@ -75,6 +75,10 @@ class UnitreeG1Config(RobotConfig):
     # "HolosomaLocomotionController". None disables it.
     controller: str | None = None
 
+    # GrootLocomotionController only: record and command the base height as an absolute action,
+    # `kBaseHeight.cmd` (m), instead of integrating remote R1/R2 inside the controller.
+    base_height_action: bool = False
+
     # Simulation only: gamepad (pygame) button index that toggles the MuJoCo elastic band, same as
     # pressing "9" in the viewer. 10 = PS button on a DualShock 4. None disables it.
     sim_band_toggle_button: int | None = 10

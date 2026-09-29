@@ -186,6 +186,60 @@ _MODE_KEYS = {
 }
 
 
+class TestBaseHeightAction:
+    def test_stock_default_off_g1ah_default_on(self):
+        from lerobot.robots.unitree_g1.config_unitree_g1 import UnitreeG1Config
+
+        assert UnitreeG1Config().base_height_action is False
+        assert UnitreeG1AhConfig().base_height_action is True
+
+    @pytest.mark.parametrize(
+        "controller_name, enabled, expected",
+        [
+            ("GrootLocomotionController", True, True),
+            ("GrootLocomotionController", False, False),
+            ("HolosomaLocomotionController", True, False),
+        ],
+    )
+    def test_feature_only_with_groot_and_flag(
+        self, headhand_server, tmp_path, controller_name, enabled, expected
+    ):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks, controller=_make_stub_controller())
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            robot = _new_robot(
+                headhand_server,
+                mocks,
+                tmp_path,
+                config_kwargs={"controller": controller_name, "base_height_action": enabled},
+            )
+            assert ("kBaseHeight.cmd" in robot.action_features) is expected
+            assert "kBaseHeight.cmd" not in robot.observation_features
+
+    def test_no_controller_has_no_height(self, g1ah_robot):
+        robot, _ = g1ah_robot
+        assert "kBaseHeight.cmd" not in robot.action_features
+
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_height_forwarded_to_controller_only_when_enabled(self, headhand_server, tmp_path, enabled):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks, controller=_make_stub_controller())
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            robot = _new_robot(
+                headhand_server,
+                mocks,
+                tmp_path,
+                config_kwargs={"controller": "GrootLocomotionController", "base_height_action": enabled},
+            )
+            robot._update_controller_action({"kBaseHeight.cmd": 0.6, "remote.button.0": 1.0})
+            assert ("kBaseHeight.cmd" in robot.controller_input) is enabled
+            assert robot.controller_input["remote.button.0"] == 1.0
+
+
 class TestG1AhLegacyCalibration:
     def test_legacy_motor_names_are_migrated_on_load(self, headhand_server, tmp_path):
         import json
@@ -234,8 +288,11 @@ class TestG1AhFeatures:
             assert list(robot.observation_features) == list(state_keys)
             assert list(robot.action_features) == list(state_keys)
 
+    @pytest.mark.parametrize("base_height_action", [True, False])
     @pytest.mark.parametrize("hand_representation", ["closure", "per_motor"])
-    def test_action_features_with_controller(self, headhand_server, tmp_path, hand_representation):
+    def test_action_features_with_controller(
+        self, headhand_server, tmp_path, hand_representation, base_height_action
+    ):
         mocks = _make_sdk_mocks(mode_machine=4)
         controller = _make_stub_controller()
         patches, *_ = _make_g1ah(mocks, controller=controller)
@@ -249,10 +306,12 @@ class TestG1AhFeatures:
                 config_kwargs={
                     "controller": "GrootLocomotionController",
                     "hand_representation": hand_representation,
+                    "base_height_action": base_height_action,
                 },
             )
             state_keys, arm_mode_keys = _MODE_KEYS[hand_representation]
-            assert list(robot.action_features) == list(arm_mode_keys)
+            expected = list(arm_mode_keys) + (["kBaseHeight.cmd"] if base_height_action else [])
+            assert list(robot.action_features) == expected
             assert list(robot.observation_features) == list(state_keys)
 
 

@@ -140,7 +140,7 @@ class TestG1AhRecordLoopIntegration:
             robot.connect(calibrate=False)
             try:
                 ds_features = _dataset_features(robot)
-                assert ds_features[ACTION]["names"] == list(arm_mode_keys)
+                assert ds_features[ACTION]["names"] == [*arm_mode_keys, "kBaseHeight.cmd"]
                 assert ds_features["observation.state"]["names"] == list(state_keys)
 
                 for _ in range(5):
@@ -149,7 +149,8 @@ class TestG1AhRecordLoopIntegration:
                     sent = robot.send_action(action)
 
                     act_frame = build_dataset_frame(ds_features, sent, ACTION)
-                    assert act_frame[ACTION].shape == (len(arm_mode_keys),)
+                    assert act_frame[ACTION].shape == (len(arm_mode_keys) + 1,)
+                    assert act_frame[ACTION][-1] == pytest.approx(0.74)
 
                     obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)
                     assert obs_frame["observation.state"].shape == (len(state_keys),)
