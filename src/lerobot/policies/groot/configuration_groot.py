@@ -335,6 +335,10 @@ class GrootConfig(PreTrainedConfig):
     # keep the gripper absolute, matching the Isaac-GR00T single-arm + absolute-gripper convention.
     relative_exclude_joints: list[str] = field(default_factory=list)
 
+    # How relative actions find their reference state: "index" pairs action column i with state column i;
+    # "name" pairs each action with the same-named state feature, and unmatched actions stay absolute.
+    relative_action_pairing: str = "index"
+
     # Training parameters
     optimizer_lr: float = 1e-4
     # Isaac-GR00T N1.7 fine-tunes with AdamW betas (0.9, 0.999).
@@ -436,6 +440,10 @@ class GrootConfig(PreTrainedConfig):
         if self.n_action_steps > self.chunk_size:
             raise ValueError(
                 f"n_action_steps ({self.n_action_steps}) cannot exceed chunk_size ({self.chunk_size})"
+            )
+        if self.relative_action_pairing not in ("index", "name"):
+            raise ValueError(
+                f"relative_action_pairing must be 'index' or 'name', got {self.relative_action_pairing!r}"
             )
 
     def validate_features(self) -> None:

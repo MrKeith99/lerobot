@@ -400,7 +400,10 @@ lacks and are dropped — **unverified on UnitreeG1Ah hardware**; use a gantry. 
 to the stock layout's 14 arm targets + `remote.lx/ly/rx/ry`, followed by head + hands, in this mode
 (the controller owns legs/waist): the 22-key `CLOSURE_ARM_MODE_ACTION_KEYS`, or the 36-key
 `ARM_MODE_ACTION_KEYS` with `hand_representation=per_motor`, plus `kBaseHeight.cmd` with GR00T
-(23 or 37 keys). `observation.state` keeps the full body (33 or 47 keys).
+(23 or 37 keys). `observation.state` keeps the full body (33 or 47 keys). For GR00T fine-tuning with
+relative actions on this layout, add `--policy.relative_action_pairing=name
+--policy.relative_exclude_joints='["closure"]'`: arms and head become relative to their own measured
+state, and `remote.*`, `kBaseHeight.cmd` and the hand closures stay absolute (see [GR00T](./groot)).
 
 ## Teleoperate (keyboard)
 

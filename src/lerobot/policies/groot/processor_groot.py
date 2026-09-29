@@ -104,6 +104,8 @@ from .utils import (
 # action chunks, so processor-side horizons are capped at this value.
 N1_7_NATIVE_ACTION_HORIZON = 40
 
+_STATE_EXTRA_GROUP_KEY = "state_extra"
+
 N1_7_EMBODIMENT_MAPPING = {
     "oxe_droid_relative_eef_relative_joint": 24,
     "xdof_relative_eef_relative_joint": 27,
@@ -623,6 +625,86 @@ def _resolve_action_feature_names_from_dataset_meta(dataset_meta: Any | None) ->
     return _resolve_feature_names_from_dataset_meta(dataset_meta, ACTION)
 
 
+def _resolve_state_feature_names_from_dataset_meta(dataset_meta: Any | None) -> list[str] | None:
+    features = getattr(dataset_meta, "features", {}) or {}
+    feature = features.get(OBS_STATE) if isinstance(features, dict) else None
+    names = feature.get("names") if isinstance(feature, dict) else getattr(feature, "names", None)
+    if names is None:
+        return None
+    if not isinstance(names, (list, tuple)) or not all(isinstance(name, str) for name in names):
+        raise ValueError(
+            "relative_action_pairing='name' needs observation.state feature names as a flat list of "
+            f"strings, got {names!r}."
+        )
+    return list(names)
+
+
+def _excluded_by_tokens(name: str, exclude_joints: list[str]) -> bool:
+    lowered = str(name).lower()
+    return any(
+        token == lowered or token in lowered for token in (str(t).lower() for t in exclude_joints if t)
+    )
+
+
+def _name_pairing_plan(
+    action_names: list[str], state_names: list[str], exclude_joints: list[str]
+) -> tuple[list[int], list[str]]:
+    """Pair each action column with the same-named observation.state column for relative actions.
+
+    Returns a state-column permutation that places every paired state column at its action column's
+    index (unpaired positions take unused columns, the remaining columns follow), and the exclude list
+    extended with the action names that have no state counterpart, so they stay absolute.
+    """
+    if len(set(state_names)) != len(state_names):
+        raise ValueError("relative_action_pairing='name' needs unique observation.state feature names.")
+    if len(state_names) < len(action_names):
+        raise ValueError(
+            "relative_action_pairing='name' needs at least as many observation.state features as action "
+            f"features, got {len(state_names)} state and {len(action_names)} action features."
+        )
+    state_index = {name: index for index, name in enumerate(state_names)}
+    paired: list[int | None] = []
+    effective_exclude = list(exclude_joints)
+    for name in action_names:
+        if _excluded_by_tokens(name, exclude_joints):
+            paired.append(None)
+        elif name in state_index:
+            paired.append(state_index[name])
+        else:
+            paired.append(None)
+            effective_exclude.append(name)
+    if all(index is None for index in paired):
+        raise ValueError(
+            "relative_action_pairing='name' found no action feature with a same-named observation.state "
+            "feature, so no action can be relative."
+        )
+    for name, index in zip(action_names, paired, strict=True):
+        if index is not None and _excluded_by_tokens(name, effective_exclude):
+            raise ValueError(
+                f"Relative action '{name}' would be excluded by an unpaired action name that is a substring "
+                "of it; rename the features or pair them explicitly."
+            )
+    used = {index for index in paired if index is not None}
+    unused = [index for index in range(len(state_names)) if index not in used]
+    fillers = iter(unused)
+    permutation = [index if index is not None else next(fillers) for index in paired]
+    permutation.extend(fillers)
+    return permutation, effective_exclude
+
+
+def _name_pairing_plan_from_dataset_meta(
+    config: GrootConfig, dataset_meta: Any | None
+) -> tuple[list[int], list[str]]:
+    action_names = _resolve_action_feature_names_from_dataset_meta(dataset_meta)
+    state_names = _resolve_state_feature_names_from_dataset_meta(dataset_meta)
+    if not action_names or not state_names:
+        raise ValueError(
+            "relative_action_pairing='name' needs the dataset's action and observation.state feature names "
+            "(dataset_meta.features); build the processors from a LeRobot dataset."
+        )
+    return _name_pairing_plan(action_names, state_names, list(config.relative_exclude_joints or []))
+
+
 def _resolve_visual_modality_keys_from_dataset_meta(dataset_meta: Any | None) -> list[str] | None:
     features = getattr(dataset_meta, "features", {}) or {}
     if not isinstance(features, dict):
@@ -768,6 +850,7 @@ def _make_relative_action_training_stats(
     exclude_joints: list[str] | None,
     action_names: list[str] | None,
     preserve_action_horizon: bool = True,
+    state_permutation: list[int] | None = None,
 ) -> dict[str, dict[str, Any]]:
     try:
         dataset_len = len(dataset)
@@ -793,6 +876,8 @@ def _make_relative_action_training_stats(
         action = _to_float_tensor(action_value, key=ACTION)
         state = _to_float_tensor(state_value, key=OBS_STATE)
         state_batch = _state_reference_batch(state)
+        if state_permutation is not None:
+            state_batch = state_batch[..., state_permutation]
         action_batch = _action_training_batch(action, state_batch)
         if action_batch.shape[0] != state_batch.shape[0]:
             if state_batch.shape[0] == 1:
@@ -856,7 +941,11 @@ def _stats_preserve_action_horizon(stats: dict[str, dict[str, Any]] | None) -> b
 
 
 def _make_relative_action_training_stats_from_dataset_meta(
-    config: GrootConfig, dataset_meta: Any | None
+    config: GrootConfig,
+    dataset_meta: Any | None,
+    *,
+    state_permutation: list[int] | None = None,
+    exclude_joints: list[str] | None = None,
 ) -> dict[str, dict[str, Any]] | None:
     repo_id = getattr(dataset_meta, "repo_id", None)
     root = getattr(dataset_meta, "root", None)
@@ -880,9 +969,12 @@ def _make_relative_action_training_stats_from_dataset_meta(
     )
     return _make_relative_action_training_stats(
         dataset,
-        exclude_joints=list(config.relative_exclude_joints or []),
+        exclude_joints=list(
+            exclude_joints if exclude_joints is not None else config.relative_exclude_joints or []
+        ),
         action_names=_resolve_action_feature_names_from_dataset_meta(dataset_meta),
         preserve_action_horizon=True,
+        state_permutation=state_permutation,
     )
 
 
@@ -1002,6 +1094,8 @@ def _build_n1_7_relative_action_processor_assets(
     dataset_meta: Any | None,
     *,
     base_assets: _GrootN17CheckpointProcessorAssets | None = None,
+    state_permutation: list[int] | None = None,
+    exclude_joints: list[str] | None = None,
 ) -> _GrootN17CheckpointProcessorAssets | None:
     if not config.use_relative_actions or not dataset_stats:
         return None
@@ -1018,7 +1112,9 @@ def _build_n1_7_relative_action_processor_assets(
     groups = _infer_n1_7_action_groups(
         action_names,
         action_dim=action_dim,
-        exclude_joints=list(config.relative_exclude_joints or []),
+        exclude_joints=list(
+            exclude_joints if exclude_joints is not None else config.relative_exclude_joints or []
+        ),
     )
     if not groups or not any(group.relative for group in groups):
         return None
@@ -1033,6 +1129,8 @@ def _build_n1_7_relative_action_processor_assets(
     relative_action_stats = dataset_stats.get(ACTION, {})
     if not state_stats or not absolute_action_stats or not relative_action_stats:
         return None
+    if state_permutation is not None:
+        state_stats = _slice_stats_entry(state_stats, state_permutation)
 
     raw_stats: dict[str, Any] = {
         "state": _group_stats_by_action_groups(state_stats, groups),
@@ -1059,8 +1157,16 @@ def _build_n1_7_relative_action_processor_assets(
     action_horizon = _relative_stats_action_horizon(relative_action_stats) or min(
         config.chunk_size, N1_7_NATIVE_ACTION_HORIZON
     )
+    state_keys = [group.key for group in groups]
+    # With name pairing the state is reordered and may be longer than the action; give the trailing
+    # state-only columns their own group so every state column is normalized with its real stats.
+    if state_permutation is not None and len(state_permutation) > action_dim:
+        raw_stats["state"][_STATE_EXTRA_GROUP_KEY] = _slice_stats_entry(
+            state_stats, list(range(action_dim, len(state_permutation)))
+        )
+        state_keys.append(_STATE_EXTRA_GROUP_KEY)
     modality_config: dict[str, Any] = {
-        "state": {"modality_keys": [group.key for group in groups]},
+        "state": {"modality_keys": state_keys},
         "action": {
             "modality_keys": [group.key for group in groups],
             "action_configs": action_configs,
@@ -1166,17 +1272,29 @@ def make_groot_pre_post_processors(
     checkpoint_assets = _load_n1_7_checkpoint_processor_assets(config)
     checkpoint_stats = checkpoint_assets.stats if checkpoint_assets is not None else None
     checkpoint_has_stats = has_modality_stats(checkpoint_stats)
+    state_permutation: list[int] | None = None
+    relative_exclude: list[str] | None = None
+    if config.use_relative_actions and config.relative_action_pairing == "name":
+        if checkpoint_has_stats:
+            raise ValueError(
+                "relative_action_pairing='name' is supported on GR00T's native relative-action path only, "
+                f"i.e. a checkpoint without baked-in statistics for embodiment '{config.embodiment_tag}' "
+                "(e.g. nvidia/GR00T-N1.7-3B with embodiment_tag='new_embodiment')."
+            )
+        state_permutation, relative_exclude = _name_pairing_plan_from_dataset_meta(config, dataset_meta)
     if config.use_relative_actions and not checkpoint_has_stats:
         relative_dataset_stats = dataset_stats
         if not _stats_preserve_action_horizon(relative_dataset_stats):
             relative_dataset_stats = _make_relative_action_training_stats_from_dataset_meta(
-                config, dataset_meta
+                config, dataset_meta, state_permutation=state_permutation, exclude_joints=relative_exclude
             )
         relative_assets = _build_n1_7_relative_action_processor_assets(
             config,
             relative_dataset_stats,
             dataset_meta,
             base_assets=checkpoint_assets,
+            state_permutation=state_permutation,
+            exclude_joints=relative_exclude,
         )
         if relative_assets is None:
             raise ValueError(
@@ -1254,6 +1372,7 @@ def make_groot_pre_post_processors(
     input_steps: list[ProcessorStep] = [
         RenameObservationsProcessorStep(rename_map={}),
         AddBatchDimensionProcessorStep(),
+        *([GrootReorderStateStep(indices=state_permutation)] if state_permutation is not None else []),
         pack_step,
         GrootN17VLMEncodeStep(
             model_name=GROOT_N1_7_BACKBONE_MODEL,
@@ -1526,6 +1645,41 @@ def _transform_n1_7_image_for_vlm_torch(
             image, [target_h, target_w], interpolation=InterpolationMode.BICUBIC, antialias=True
         )
     return image
+
+
+@dataclass
+@ProcessorStepRegistry.register(name="groot_reorder_state")
+class GrootReorderStateStep(ProcessorStep):
+    """Permute observation.state columns by `indices` (relative_action_pairing='name').
+
+    Puts each relative action's same-named state column at that action's index, so GR00T's positional
+    relative-action conversion pairs them correctly. Runs identically at training and inference.
+    """
+
+    indices: list[int] = field(default_factory=list)
+
+    def __call__(self, transition: EnvTransition) -> EnvTransition:
+        observation = transition.get(TransitionKey.OBSERVATION)
+        if not self.indices or not observation or OBS_STATE not in observation:
+            return transition
+        state = observation[OBS_STATE]
+        if state.shape[-1] != len(self.indices):
+            raise ValueError(
+                f"GrootReorderStateStep expects {len(self.indices)} state columns, got {state.shape[-1]}."
+            )
+        if isinstance(state, torch.Tensor):
+            reordered = state.index_select(-1, torch.as_tensor(self.indices, device=state.device))
+        else:
+            reordered = np.asarray(state)[..., self.indices]
+        new_transition = transition.copy()
+        new_transition[TransitionKey.OBSERVATION] = {**observation, OBS_STATE: reordered}
+        return new_transition
+
+    def get_config(self) -> dict[str, Any]:
+        return {"indices": list(self.indices)}
+
+    def transform_features(self, features):
+        return features
 
 
 @dataclass
