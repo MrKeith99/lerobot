@@ -145,7 +145,8 @@ class UnitreeG1AhGamepadTeleopConfig(TeleoperatorConfig):
     """Hardware-light gamepad teleoperator for the UnitreeG1Ah robot.
 
     Emits every key in `TELEOP_ACTION_KEYS`: held body/hand poses, D-pad-driven
-    head targets, an R1/L1 (RB/LB on Xbox)-blended hand open/close, the 4
+    head targets, an R1/L1 (RB/LB on Xbox)-blended hand open/close (per-servo
+    targets plus `{side}_hand.closure` in [0, 1]), the 4
     `REMOTE_AXES` driven by the sticks (zeros when `emit_remote_axes` is False), and
     the 16 `REMOTE_BUTTONS`, of which L2/R2 (LT/RT) drive the locomotion controller's
     waist raise/lower slots (`remote.button.0`/`remote.button.4`).

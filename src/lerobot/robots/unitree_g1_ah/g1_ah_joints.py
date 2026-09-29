@@ -101,7 +101,20 @@ RIGHT_HAND_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in hand_motor_name
 HAND_KEYS: tuple[str, ...] = LEFT_HAND_KEYS + RIGHT_HAND_KEYS
 ALL_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + LEFT_HAND_KEYS + RIGHT_HAND_KEYS
 ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + HEAD_KEYS + HAND_KEYS + REMOTE_AXES
-TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + REMOTE_KEYS
+HAND_REPRESENTATIONS: tuple[str, ...] = ("closure", "per_motor")
+
+
+def hand_closure_key(side: str) -> str:
+    """Return the scalar closure key for one hand (0 = open, 1 = closed)."""
+    if side not in HAND_SIDES:
+        raise ValueError(f"Unknown hand side: {side!r}")
+    return f"{side}_hand.closure"
+
+
+HAND_CLOSURE_KEYS: tuple[str, ...] = tuple(hand_closure_key(side) for side in HAND_SIDES)
+CLOSURE_ACTION_KEYS: tuple[str, ...] = BODY_KEYS + HEAD_KEYS + HAND_CLOSURE_KEYS
+CLOSURE_ARM_MODE_ACTION_KEYS: tuple[str, ...] = ARM_KEYS + HEAD_KEYS + HAND_CLOSURE_KEYS + REMOTE_AXES
+TELEOP_ACTION_KEYS: tuple[str, ...] = ALL_ACTION_KEYS + HAND_CLOSURE_KEYS + REMOTE_KEYS
 INVALID_BODY_KEYS: tuple[str, ...] = tuple(
     f"{joint.name}.q" for joint in G1_29_JointIndex if joint in G1_23_INVALID_SDK_SLOTS
 )
@@ -199,6 +212,24 @@ def hand_pose_deg(side: str, closed: bool) -> tuple[float, ...]:
 def hand_pose_rad(side: str, closed: bool) -> tuple[float, ...]:
     """Return `hand_pose_deg` converted to radians."""
     return tuple(math.radians(deg) for deg in hand_pose_deg(side, closed))
+
+
+def closure_to_hand_q(side: str, closure: float) -> tuple[float, ...]:
+    """Return the 8 per-servo targets (rad) for a hand closure in [0, 1] (clipped)."""
+    c = min(max(float(closure), 0.0), 1.0)
+    return tuple(
+        open_rad + (closed_rad - open_rad) * c
+        for open_rad, closed_rad in zip(hand_pose_rad(side, False), hand_pose_rad(side, True), strict=True)
+    )
+
+
+def hand_q_to_closure(side: str, q: Sequence[float]) -> float:
+    """Return the closure in [0, 1] of 8 per-servo angles (rad): mean of each servo's open->closed fraction."""
+    open_q, closed_q = hand_pose_rad(side, False), hand_pose_rad(side, True)
+    if len(q) != len(open_q):
+        raise ValueError(f"Expected {len(open_q)} hand angles, got {len(q)}")
+    fractions = [(v - o) / (c - o) for v, o, c in zip(q, open_q, closed_q, strict=True)]
+    return min(max(sum(fractions) / len(fractions), 0.0), 1.0)
 
 
 DEFAULT_HEAD_Q: tuple[float, float] = (0.0, 0.0)

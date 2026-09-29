@@ -17,9 +17,9 @@
 """Hardware-light gamepad teleoperator for the UnitreeG1Ah robot.
 
 Emits every key in `TELEOP_ACTION_KEYS` on every `get_action()` call: held body/hand
-poses, D-pad-driven head targets, an RB/LB-blended hand open/close, the 4
-`REMOTE_AXES` driven by the sticks and the 16 `REMOTE_BUTTONS`, of which the L2/R2
-triggers drive the locomotion controller's waist raise/lower slots. All motion is
+poses, D-pad-driven head targets, an RB/LB-blended hand open/close (per-servo targets
+plus `{side}_hand.closure` in [0, 1]), the 4 `REMOTE_AXES` driven by the sticks and the
+16 `REMOTE_BUTTONS`, of which the L2/R2 triggers drive the locomotion controller's waist raise/lower slots. All motion is
 time-based (rad/s, blend/s) so behaviour does not depend on the calling loop's fps.
 """
 
@@ -33,9 +33,12 @@ from lerobot.lerobot_types import RobotAction
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
+    HAND_CLOSURE_KEYS,
+    HAND_SIDES,
     HEAD_LIMITS_RAD,
     TELEOP_ACTION_KEYS,
     default_action,
+    hand_closure_key,
     hand_motor_names,
     hand_pose_rad,
 )
@@ -58,7 +61,7 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 
 class UnitreeG1AhGamepadTeleop(Teleoperator):
-    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (61 keys)."""
+    """Gamepad teleoperator emitting the full UnitreeG1Ah teleop action space (63 keys)."""
 
     config_class = UnitreeG1AhGamepadTeleopConfig
     name = "unitree_g1_ah_gamepad"
@@ -68,14 +71,16 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         self.config = config
         self.gamepad: UnitreeG1AhGamepadInput | None = None
 
-        self._target: dict[str, float] = default_action()
+        self._target: dict[str, float] = {**default_action(), **dict.fromkeys(HAND_CLOSURE_KEYS, 0.0)}
         if config.initial_positions is not None:
-            invalid = set(config.initial_positions) - set(ALL_ACTION_KEYS)
+            invalid = set(config.initial_positions) - set(ALL_ACTION_KEYS) - set(HAND_CLOSURE_KEYS)
             if invalid:
                 raise ValueError(f"Unknown initial_positions keys: {sorted(invalid)}")
             self._target.update(config.initial_positions)
 
-        self._hand_blend: dict[str, float] = {"left": 0.0, "right": 0.0}
+        self._hand_blend: dict[str, float] = {
+            side: min(max(self._target[hand_closure_key(side)], 0.0), 1.0) for side in HAND_SIDES
+        }
         self._last_t: float | None = None
         self._open = {side: hand_pose_rad(side, False) for side in ("left", "right")}
         self._closed = {side: hand_pose_rad(side, True) for side in ("left", "right")}
@@ -143,6 +148,7 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
             step = max(-max_step, min(max_step, delta))
             self._hand_blend[side] = current + step
             blend = self._hand_blend[side]
+            self._target[hand_closure_key(side)] = blend
             for name, open_rad, closed_rad in zip(
                 hand_motor_names(side), self._open[side], self._closed[side], strict=True
             ):

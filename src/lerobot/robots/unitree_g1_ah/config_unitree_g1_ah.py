@@ -28,6 +28,7 @@ from .g1_ah_joints import (
     DEFAULT_HEAD_Q,
     G1_23_INVALID_SDK_SLOTS,
     G1_23_LEG_SLOTS,
+    HAND_REPRESENTATIONS,
     REVISIONS,
     ROBOT_TYPE_BASE,
     ROBOT_TYPE_BY_REVISION,
@@ -54,11 +55,17 @@ class UnitreeG1AhConfig(UnitreeG1Config):
         default_factory=lambda: [*DEFAULT_HAND_Q["left"], *DEFAULT_HAND_Q["right"]]
     )
     freeze_legs: bool = False
+    # "closure": one value per hand in [0, 1] (0 = open, 1 = closed); "per_motor": the 8 servo angles per hand.
+    hand_representation: str = "closure"
 
     def __post_init__(self):
         super().__post_init__()
         if self.revision not in REVISIONS:
             raise ValueError(f"revision must be one of {REVISIONS}, got {self.revision!r}")
+        if self.hand_representation not in HAND_REPRESENTATIONS:
+            raise ValueError(
+                f"hand_representation must be one of {HAND_REPRESENTATIONS}, got {self.hand_representation!r}"
+            )
         if not (len(self.kp) == len(self.kd) == len(self.default_positions) == 29):
             raise ValueError("kp, kd and default_positions must all have length 29")
         if len(self.head_default_positions) != 2:

@@ -30,7 +30,7 @@ from .keyboard_input import UnitreeG1AhKeyboardInput
 
 
 class UnitreeG1AhKeyboardTeleop(UnitreeG1AhGamepadTeleop):
-    """Keyboard teleoperator emitting the full UnitreeG1Ah teleop action space (61 keys).
+    """Keyboard teleoperator emitting the full UnitreeG1Ah teleop action space (63 keys).
 
     The 16 `REMOTE_BUTTONS` are always zero here: no keys are bound to the waist triggers.
     """

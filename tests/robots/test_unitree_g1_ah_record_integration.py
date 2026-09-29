@@ -30,7 +30,14 @@ from lerobot.utils.import_utils import _unitree_sdk_available
 if not _unitree_sdk_available:
     pytest.skip("Unitree SDK not available", allow_module_level=True)
 
-from lerobot.robots.unitree_g1_ah.g1_ah_joints import ALL_ACTION_KEYS, ARM_MODE_ACTION_KEYS, HEAD_HAND_MOTORS
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
+    ALL_ACTION_KEYS,
+    ARM_MODE_ACTION_KEYS,
+    CLOSURE_ACTION_KEYS,
+    CLOSURE_ARM_MODE_ACTION_KEYS,
+    HAND_CLOSURE_KEYS,
+    HEAD_HAND_MOTORS,
+)
 from lerobot.teleoperators.unitree_g1_ah_gamepad import (
     UnitreeG1AhGamepadTeleop,
     UnitreeG1AhGamepadTeleopConfig,
@@ -60,24 +67,37 @@ def teleop():
             t.disconnect()
 
 
+_MODE_KEYS = {
+    "closure": (CLOSURE_ACTION_KEYS, CLOSURE_ARM_MODE_ACTION_KEYS),
+    "per_motor": (ALL_ACTION_KEYS, ARM_MODE_ACTION_KEYS),
+}
+
+
+def _dataset_features(robot):
+    return combine_feature_dicts(
+        hw_to_dataset_features(robot.action_features, ACTION),
+        hw_to_dataset_features(robot.observation_features, OBS_STR),
+    )
+
+
 class TestG1AhRecordLoopIntegration:
-    def test_full_dof_record_loop(self, headhand_server, teleop, tmp_path):
+    @pytest.mark.parametrize("hand_representation", ["closure", "per_motor"])
+    def test_full_dof_record_loop(self, headhand_server, teleop, tmp_path, hand_representation):
+        state_keys, _ = _MODE_KEYS[hand_representation]
         mocks = _make_sdk_mocks(mode_machine=4)
         patches, *_ = _make_g1ah(mocks)
         with contextlib.ExitStack() as stack:
             for p in patches:
                 stack.enter_context(p)
-            robot = _new_robot(headhand_server, mocks, tmp_path)
-            robot.connect(calibrate=False)
-
-            ds_features = combine_feature_dicts(
-                hw_to_dataset_features(robot.action_features, ACTION),
-                hw_to_dataset_features(robot.observation_features, OBS_STR),
+            robot = _new_robot(
+                headhand_server, mocks, tmp_path, config_kwargs={"hand_representation": hand_representation}
             )
-            assert ds_features[ACTION]["names"] == list(ALL_ACTION_KEYS)
-            assert ds_features["observation.state"]["names"] == list(ALL_ACTION_KEYS)
-
+            robot.connect(calibrate=False)
             try:
+                ds_features = _dataset_features(robot)
+                assert ds_features[ACTION]["names"] == list(state_keys)
+                assert ds_features["observation.state"]["names"] == list(state_keys)
+
                 for _ in range(5):
                     obs = robot.get_observation()
                     act = teleop.get_action()
@@ -86,17 +106,20 @@ class TestG1AhRecordLoopIntegration:
                     obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)
                     act_frame = build_dataset_frame(ds_features, act, ACTION)
 
-                    assert obs_frame["observation.state"].shape == (41,)
-                    assert act_frame[ACTION].shape == (41,)
+                    assert obs_frame["observation.state"].shape == (len(state_keys),)
+                    assert act_frame[ACTION].shape == (len(state_keys),)
 
-                    for name in HEAD_HAND_MOTORS:
-                        key = f"{name}.q"
+                    recorded = HAND_CLOSURE_KEYS if hand_representation == "closure" else ()
+                    recorded += tuple(f"{name}.q" for name in HEAD_HAND_MOTORS if f"{name}.q" in state_keys)
+                    for key in recorded:
                         idx = ds_features[ACTION]["names"].index(key)
                         assert act_frame[ACTION][idx] == pytest.approx(sent[key], abs=1e-3)
             finally:
                 robot.disconnect()
 
-    def test_controller_mode_record_loop(self, headhand_server, teleop, tmp_path):
+    @pytest.mark.parametrize("hand_representation", ["closure", "per_motor"])
+    def test_controller_mode_record_loop(self, headhand_server, teleop, tmp_path, hand_representation):
+        state_keys, arm_mode_keys = _MODE_KEYS[hand_representation]
         mocks = _make_sdk_mocks(mode_machine=4)
         controller = _make_stub_controller()
         patches, *_ = _make_g1ah(mocks, controller=controller)
@@ -104,26 +127,71 @@ class TestG1AhRecordLoopIntegration:
             for p in patches:
                 stack.enter_context(p)
             robot = _new_robot(
-                headhand_server, mocks, tmp_path, config_kwargs={"controller": "GrootLocomotionController"}
+                headhand_server,
+                mocks,
+                tmp_path,
+                config_kwargs={
+                    "controller": "GrootLocomotionController",
+                    "hand_representation": hand_representation,
+                },
             )
             robot.connect(calibrate=False)
-
-            ds_features = combine_feature_dicts(
-                hw_to_dataset_features(robot.action_features, ACTION),
-                hw_to_dataset_features(robot.observation_features, OBS_STR),
-            )
-            assert ds_features[ACTION]["names"] == list(ARM_MODE_ACTION_KEYS)
-
             try:
+                ds_features = _dataset_features(robot)
+                assert ds_features[ACTION]["names"] == list(arm_mode_keys)
+                assert ds_features["observation.state"]["names"] == list(state_keys)
+
                 for _ in range(5):
                     obs = robot.get_observation()
                     action = teleop.get_action()
                     sent = robot.send_action(action)
 
                     act_frame = build_dataset_frame(ds_features, sent, ACTION)
-                    assert act_frame[ACTION].shape == (32,)
+                    assert act_frame[ACTION].shape == (len(arm_mode_keys),)
 
                     obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)
-                    assert obs_frame["observation.state"].shape == (41,)
+                    assert obs_frame["observation.state"].shape == (len(state_keys),)
+            finally:
+                robot.disconnect()
+
+    def test_held_rb_is_recorded_as_right_closure(self, headhand_server, teleop, tmp_path):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            robot = _new_robot(headhand_server, mocks, tmp_path)
+            robot.connect(calibrate=False)
+            try:
+                ds_features = _dataset_features(robot)
+                names = ds_features[ACTION]["names"]
+                clock = {"t": 0.0}
+                with patch(f"{_GAMEPAD_MODULE}.time.perf_counter", lambda: clock["t"]):
+                    teleop.get_action()
+                    teleop.gamepad.buttons.add(teleop.config.layout.button_rb)
+                    closures = []
+                    for _ in range(30):
+                        clock["t"] += 0.05
+                        act = teleop.get_action()
+                        robot.send_action(act)
+                        frame = build_dataset_frame(ds_features, act, ACTION)[ACTION]
+                        closures.append(float(frame[names.index("right_hand.closure")]))
+                        assert frame[names.index("left_hand.closure")] == 0.0
+
+                assert closures == sorted(closures)
+                assert closures[0] == pytest.approx(teleop.config.hand_blend_per_s * 0.05)
+                assert closures[-1] == pytest.approx(1.0)
+
+                import time
+
+                deadline = time.time() + 2.0
+                obs = robot.get_observation()
+                while time.time() < deadline and obs.get("right_hand.closure", 0.0) < 0.98:
+                    time.sleep(0.02)
+                    obs = robot.get_observation()
+                obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)["observation.state"]
+                obs_names = ds_features["observation.state"]["names"]
+                assert obs_frame[obs_names.index("right_hand.closure")] == pytest.approx(1.0, abs=0.02)
+                assert obs_frame[obs_names.index("left_hand.closure")] == pytest.approx(0.0, abs=0.02)
             finally:
                 robot.disconnect()

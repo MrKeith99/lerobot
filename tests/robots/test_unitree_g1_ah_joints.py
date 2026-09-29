@@ -30,8 +30,23 @@ def test_key_counts():
     assert len(j.HAND_KEYS) == 16
     assert len(j.ALL_ACTION_KEYS) == 41
     assert len(j.ARM_MODE_ACTION_KEYS) == 32
-    assert len(j.TELEOP_ACTION_KEYS) == 61
+    assert len(j.TELEOP_ACTION_KEYS) == 63
     assert len(j.HEAD_HAND_KEYS) == 18
+    assert j.HAND_CLOSURE_KEYS == ("left_hand.closure", "right_hand.closure")
+    assert len(j.CLOSURE_ACTION_KEYS) == 27
+    assert len(j.CLOSURE_ARM_MODE_ACTION_KEYS) == 18
+
+
+def test_closure_key_order_body_head_left_right():
+    assert j.CLOSURE_ACTION_KEYS == j.BODY_KEYS + j.HEAD_KEYS + ("left_hand.closure", "right_hand.closure")
+    assert j.CLOSURE_ARM_MODE_ACTION_KEYS[-4:] == j.REMOTE_AXES
+    assert set(j.CLOSURE_ACTION_KEYS) <= set(j.TELEOP_ACTION_KEYS)
+    assert set(j.CLOSURE_ARM_MODE_ACTION_KEYS) <= set(j.TELEOP_ACTION_KEYS)
+
+
+def test_hand_closure_key_rejects_unknown_side():
+    with pytest.raises(ValueError):
+        j.hand_closure_key("middle")
 
 
 def test_sdk23_to_29_strictly_increasing_and_valid():
@@ -103,10 +118,12 @@ def test_head_hand_motors_unique_names_and_ids():
     assert len(j.HEAD_HAND_MOTORS) == len(set(j.HEAD_HAND_MOTORS.keys()))
 
 
-def test_keys_have_no_slash_and_end_with_q_except_remote():
+def test_keys_have_no_slash_and_end_with_q_except_remote_and_closure():
     for key in j.TELEOP_ACTION_KEYS:
         assert "/" not in key
-        if key not in j.REMOTE_KEYS:
+        if key in j.HAND_CLOSURE_KEYS:
+            assert key.endswith(".closure")
+        elif key not in j.REMOTE_KEYS:
             assert key.endswith(".q")
 
 
@@ -163,6 +180,56 @@ def test_hand_pose_rad_within_limit():
         for closed in (False, True):
             for value in j.hand_pose_rad(side, closed):
                 assert abs(value) <= j.HAND_LIMIT_RAD + 1e-9
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_closure_endpoints_match_open_and_closed_poses(side):
+    assert j.closure_to_hand_q(side, 0.0) == pytest.approx(j.hand_pose_rad(side, False))
+    assert j.closure_to_hand_q(side, 1.0) == pytest.approx(j.hand_pose_rad(side, True))
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_closure_midpoint_is_per_motor_mean(side):
+    mid = j.closure_to_hand_q(side, 0.5)
+    for q, open_q, closed_q in zip(
+        mid, j.hand_pose_rad(side, False), j.hand_pose_rad(side, True), strict=True
+    ):
+        assert q == pytest.approx((open_q + closed_q) / 2)
+
+
+@pytest.mark.parametrize("closure, expected", [(-0.5, 0.0), (1.5, 1.0)])
+def test_closure_to_hand_q_clips(closure, expected):
+    assert j.closure_to_hand_q("right", closure) == pytest.approx(j.closure_to_hand_q("right", expected))
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize("closure", [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0])
+def test_hand_q_to_closure_inverts_closure_to_hand_q(side, closure):
+    assert j.hand_q_to_closure(side, j.closure_to_hand_q(side, closure)) == pytest.approx(closure)
+
+
+def test_hand_q_to_closure_clips_out_of_range_angles():
+    beyond_open = [
+        q + (q - c)
+        for q, c in zip(j.hand_pose_rad("right", False), j.hand_pose_rad("right", True), strict=True)
+    ]
+    beyond_closed = [
+        c + (c - q)
+        for q, c in zip(j.hand_pose_rad("right", False), j.hand_pose_rad("right", True), strict=True)
+    ]
+    assert j.hand_q_to_closure("right", beyond_open) == 0.0
+    assert j.hand_q_to_closure("right", beyond_closed) == 1.0
+
+
+def test_hand_q_to_closure_averages_uneven_fingers():
+    q = list(j.hand_pose_rad("left", False))
+    q[:2] = j.hand_pose_rad("left", True)[:2]
+    assert j.hand_q_to_closure("left", q) == pytest.approx(2 / 8)
+
+
+def test_hand_q_to_closure_rejects_wrong_length():
+    with pytest.raises(ValueError):
+        j.hand_q_to_closure("left", [0.0] * 7)
 
 
 def test_default_action_keys_and_zero_body():

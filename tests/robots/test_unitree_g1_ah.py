@@ -29,9 +29,15 @@ if not _unitree_sdk_available:
 from lerobot.robots.unitree_g1_ah.config_unitree_g1_ah import UnitreeG1AhConfig
 from lerobot.robots.unitree_g1_ah.g1_ah_devices import default_calibration
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
+    ALL_ACTION_KEYS,
     ARM_MODE_ACTION_KEYS,
+    CLOSURE_ACTION_KEYS,
+    CLOSURE_ARM_MODE_ACTION_KEYS,
     G1_23_BODY_JOINTS,
+    HAND_CLOSURE_KEYS,
     HEAD_HAND_MOTORS,
+    closure_to_hand_q,
+    hand_motor_names,
 )
 from tests.mocks.mock_unitree_g1_ah_server import MockHeadHandServer
 
@@ -174,14 +180,37 @@ class TestG1AhIdentity:
             assert robot.name == "unitree_g1_23dof_ah8_d455_2dof"
 
 
-class TestG1AhFeatures:
-    def test_observation_and_action_features_no_controller(self, g1ah_robot):
-        robot, _ = g1ah_robot
-        assert len(robot.observation_features) == 41
-        assert len(robot.action_features) == 41
-        assert list(robot.action_features) == list(robot._motors_ft)
+_MODE_KEYS = {
+    "closure": (CLOSURE_ACTION_KEYS, CLOSURE_ARM_MODE_ACTION_KEYS),
+    "per_motor": (ALL_ACTION_KEYS, ARM_MODE_ACTION_KEYS),
+}
 
-    def test_action_features_with_controller(self, headhand_server, tmp_path):
+
+class TestG1AhFeatures:
+    def test_default_hand_representation_is_closure(self, g1ah_robot):
+        robot, _ = g1ah_robot
+        assert robot.config.hand_representation == "closure"
+        assert len(robot.observation_features) == 27
+        assert len(robot.action_features) == 27
+
+    @pytest.mark.parametrize("hand_representation", ["closure", "per_motor"])
+    def test_observation_and_action_features_no_controller(
+        self, headhand_server, tmp_path, hand_representation
+    ):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            robot = _new_robot(
+                headhand_server, mocks, tmp_path, config_kwargs={"hand_representation": hand_representation}
+            )
+            state_keys, _ = _MODE_KEYS[hand_representation]
+            assert list(robot.observation_features) == list(state_keys)
+            assert list(robot.action_features) == list(state_keys)
+
+    @pytest.mark.parametrize("hand_representation", ["closure", "per_motor"])
+    def test_action_features_with_controller(self, headhand_server, tmp_path, hand_representation):
         mocks = _make_sdk_mocks(mode_machine=4)
         controller = _make_stub_controller()
         patches, *_ = _make_g1ah(mocks, controller=controller)
@@ -189,10 +218,110 @@ class TestG1AhFeatures:
             for p in patches:
                 stack.enter_context(p)
             robot = _new_robot(
-                headhand_server, mocks, tmp_path, config_kwargs={"controller": "GrootLocomotionController"}
+                headhand_server,
+                mocks,
+                tmp_path,
+                config_kwargs={
+                    "controller": "GrootLocomotionController",
+                    "hand_representation": hand_representation,
+                },
             )
-            assert len(robot.action_features) == 32
-            assert list(robot.action_features) == list(ARM_MODE_ACTION_KEYS)
+            state_keys, arm_mode_keys = _MODE_KEYS[hand_representation]
+            assert list(robot.action_features) == list(arm_mode_keys)
+            assert list(robot.observation_features) == list(state_keys)
+
+
+def _latest_goal_ticks(headhand_server, names, timeout_s=2.0):
+    import time
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        for cmd in reversed(headhand_server.received):
+            goal_ticks = cmd.get("goal_ticks") or {}
+            if all(name in goal_ticks for name in names):
+                return goal_ticks
+        time.sleep(0.01)
+    return None
+
+
+def _wait_for_observation(robot, key, expected, timeout_s=2.0):
+    import time
+
+    deadline = time.time() + timeout_s
+    obs = robot.get_observation()
+    while time.time() < deadline and abs(obs.get(key, -1.0) - expected) > 0.02:
+        time.sleep(0.02)
+        obs = robot.get_observation()
+    return obs
+
+
+class TestG1AhHandClosure:
+    @pytest.mark.parametrize("closure", [0.0, 0.5, 1.0])
+    def test_closure_action_sends_interpolated_hand_ticks(self, g1ah_robot, headhand_server, closure):
+        from lerobot.robots.unitree_g1_ah.g1_ah_devices import rad_to_ticks
+
+        robot, _ = g1ah_robot
+        robot.connect(calibrate=False)
+        headhand_server.received.clear()
+        sent = robot.send_action({"right_hand.closure": closure})
+
+        names = hand_motor_names("right")
+        goal_ticks = _latest_goal_ticks(headhand_server, names)
+        assert goal_ticks is not None
+        expected = [
+            rad_to_ticks("scs0009", q, robot.calibration[name])
+            for name, q in zip(names, closure_to_hand_q("right", closure), strict=True)
+        ]
+        assert [goal_ticks[name] for name in names] == expected
+        assert not any(name in goal_ticks for name in hand_motor_names("left"))
+        assert sent["right_hand.closure"] == pytest.approx(closure)
+
+    def test_closure_is_clipped(self, g1ah_robot):
+        robot, _ = g1ah_robot
+        robot.connect(calibrate=False)
+        sent = robot.send_action({"left_hand.closure": 1.7, "right_hand.closure": -0.3})
+        assert sent["left_hand.closure"] == 1.0
+        assert sent["right_hand.closure"] == 0.0
+        assert [sent[f"{name}.q"] for name in hand_motor_names("left")] == pytest.approx(
+            closure_to_hand_q("left", 1.0), abs=1e-6
+        )
+
+    def test_closure_overrides_per_motor_keys(self, g1ah_robot):
+        robot, _ = g1ah_robot
+        robot.connect(calibrate=False)
+        action = dict.fromkeys((f"{name}.q" for name in hand_motor_names("right")), 0.0)
+        action["right_hand.closure"] = 1.0
+        sent = robot.send_action(action)
+        assert [sent[f"{name}.q"] for name in hand_motor_names("right")] == pytest.approx(
+            closure_to_hand_q("right", 1.0), abs=1e-6
+        )
+
+    @pytest.mark.parametrize("closure", [0.0, 0.3, 1.0])
+    def test_observation_reports_measured_closure(self, g1ah_robot, closure):
+        robot, _ = g1ah_robot
+        robot.connect(calibrate=False)
+        robot.send_action(dict.fromkeys(HAND_CLOSURE_KEYS, closure))
+        obs = _wait_for_observation(robot, "left_hand.closure", closure)
+        for key in HAND_CLOSURE_KEYS:
+            assert obs[key] == pytest.approx(closure, abs=0.02)
+            assert 0.0 <= obs[key] <= 1.0
+
+    def test_per_motor_mode_ignores_closure_keys(self, headhand_server, tmp_path):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        patches, *_ = _make_g1ah(mocks)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            robot = _new_robot(
+                headhand_server, mocks, tmp_path, config_kwargs={"hand_representation": "per_motor"}
+            )
+            robot.connect(calibrate=False)
+            try:
+                sent = robot.send_action({"right_hand.closure": 1.0})
+                assert not any(f"{name}.q" in sent for name in hand_motor_names("right"))
+                assert not any(key in robot.get_observation() for key in HAND_CLOSURE_KEYS)
+            finally:
+                robot.disconnect()
 
 
 class TestG1AhConnect:

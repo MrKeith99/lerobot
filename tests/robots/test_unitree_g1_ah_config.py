@@ -23,6 +23,7 @@ import pytest
 from lerobot.robots.unitree_g1_ah.config_unitree_g1_ah import UnitreeG1AhConfig
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
+    CLOSURE_ACTION_KEYS,
     G1_23_INVALID_SDK_SLOTS,
     G1_23_LEG_SLOTS,
     TELEOP_ACTION_KEYS,
@@ -56,6 +57,16 @@ class TestG1AhConfigDefaults:
     def test_invalid_revision_raises(self):
         with pytest.raises(ValueError):
             UnitreeG1AhConfig(revision="not_a_revision")
+
+    def test_hand_representation_defaults_to_closure(self):
+        assert UnitreeG1AhConfig().hand_representation == "closure"
+
+    def test_hand_representation_per_motor_accepted(self):
+        assert UnitreeG1AhConfig(hand_representation="per_motor").hand_representation == "per_motor"
+
+    def test_invalid_hand_representation_raises(self):
+        with pytest.raises(ValueError, match="hand_representation"):
+            UnitreeG1AhConfig(hand_representation="joints")
 
 
 class TestG1AhConfigGains:
@@ -118,6 +129,14 @@ class TestG1AhDatasetFeatures:
         values = dict.fromkeys(TELEOP_ACTION_KEYS, 0.0)
         frame = build_dataset_frame(ds_features, values, "action")
         assert frame["action"].shape == (41,)
+
+    def test_build_closure_dataset_frame_with_teleop_keys(self):
+        ds_features = hw_to_dataset_features(dict.fromkeys(CLOSURE_ACTION_KEYS, float), "action")
+        values = dict.fromkeys(TELEOP_ACTION_KEYS, 0.0)
+        values["right_hand.closure"] = 0.75
+        frame = build_dataset_frame(ds_features, values, "action")
+        assert frame["action"].shape == (27,)
+        assert frame["action"][ds_features["action"]["names"].index("right_hand.closure")] == 0.75
 
 
 class TestG1AhDeviceClassFallback:

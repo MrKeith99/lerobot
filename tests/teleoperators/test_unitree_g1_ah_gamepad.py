@@ -21,7 +21,14 @@ from unittest.mock import patch
 import pytest
 
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS
-from lerobot.robots.unitree_g1_ah.g1_ah_joints import TELEOP_ACTION_KEYS, default_action, hand_pose_rad
+from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
+    HAND_CLOSURE_KEYS,
+    TELEOP_ACTION_KEYS,
+    closure_to_hand_q,
+    default_action,
+    hand_motor_names,
+    hand_pose_rad,
+)
 from lerobot.teleoperators.unitree_g1_ah_gamepad import (
     UnitreeG1AhGamepadTeleop,
     UnitreeG1AhGamepadTeleopConfig,
@@ -93,7 +100,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 61
+    assert len(teleop.action_features) == 63
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -108,6 +115,8 @@ def test_idle_action_matches_default_and_zero_remote(teleop):
         assert action[key] == pytest.approx(value)
     for key in REMOTE_KEYS:
         assert action[key] == pytest.approx(0.0)
+    for key in HAND_CLOSURE_KEYS:
+        assert action[key] == 0.0
 
 
 def test_triggers_drive_waist_buttons_not_hands(teleop):
@@ -219,6 +228,73 @@ def test_rb_release_returns_to_open(teleop):
             strict=True,
         ):
             assert action[f"{name}.q"] == pytest.approx(expected, abs=1e-3)
+
+
+def _hold(teleop, clock, button, seconds, steps=50):
+    if button is not None:
+        teleop.gamepad.buttons.add(button)
+    for _ in range(steps):
+        clock["t"] += seconds / steps
+        action = teleop.get_action()
+    return action
+
+
+def test_rb_ramps_right_closure_at_blend_rate(teleop):
+    clock = {"t": 0.0}
+    rate = teleop.config.hand_blend_per_s
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        teleop.get_action()
+        half = _hold(teleop, clock, teleop.config.layout.button_rb, 0.5 / rate)
+        assert half["right_hand.closure"] == pytest.approx(0.5, abs=1e-6)
+        assert half["left_hand.closure"] == 0.0
+        full = _hold(teleop, clock, None, 1.0 / rate)
+        assert full["right_hand.closure"] == pytest.approx(1.0)
+        assert full["left_hand.closure"] == 0.0
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_closure_matches_per_motor_targets(teleop, side):
+    button = teleop.config.layout.button_lb if side == "left" else teleop.config.layout.button_rb
+    clock = {"t": 0.0}
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        teleop.get_action()
+        teleop.gamepad.buttons.add(button)
+        for _ in range(40):
+            clock["t"] += 0.01
+            action = teleop.get_action()
+            closure = action[f"{side}_hand.closure"]
+            assert 0.0 <= closure <= 1.0
+            motors = [action[f"{name}.q"] for name in hand_motor_names(side)]
+            assert motors == pytest.approx(closure_to_hand_q(side, closure), abs=1e-9)
+
+
+def test_lb_release_returns_left_closure_to_zero(teleop):
+    clock = {"t": 0.0}
+    rate = teleop.config.hand_blend_per_s
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        teleop.get_action()
+        closed = _hold(teleop, clock, teleop.config.layout.button_lb, 1.0 / rate)
+        assert closed["left_hand.closure"] == pytest.approx(1.0)
+        teleop.gamepad.buttons.discard(teleop.config.layout.button_lb)
+        released = _hold(teleop, clock, None, 1.0 / rate)
+        assert released["left_hand.closure"] == pytest.approx(0.0)
+
+
+def test_initial_closure_seeds_hand_blend():
+    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        t = UnitreeG1AhGamepadTeleop(
+            UnitreeG1AhGamepadTeleopConfig(
+                initial_positions={"left_hand.closure": 1.0, "right_hand.closure": 0.25}
+            )
+        )
+        t.connect()
+        action = t.get_action()
+        t.disconnect()
+    assert action["left_hand.closure"] == pytest.approx(1.0)
+    assert action["right_hand.closure"] == pytest.approx(0.25)
+    assert [action[f"{name}.q"] for name in hand_motor_names("left")] == pytest.approx(
+        hand_pose_rad("left", True)
+    )
 
 
 def test_body_keys_never_change(teleop):

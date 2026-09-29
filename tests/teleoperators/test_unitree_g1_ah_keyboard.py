@@ -203,7 +203,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 61
+    assert len(teleop.action_features) == 63
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -257,6 +257,8 @@ def test_e_held_closes_right_hand(teleop):
             strict=True,
         ):
             assert action[f"{name}.q"] == pytest.approx(expected, abs=1e-3)
+        assert action["right_hand.closure"] == pytest.approx(1.0, abs=1e-3)
+        assert action["left_hand.closure"] == 0.0
 
         default = default_action()
         for i in range(1, 5):

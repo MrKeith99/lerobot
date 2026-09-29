@@ -43,8 +43,11 @@ from .g1_ah_devices import (
 from .g1_ah_joints import (
     ALL_ACTION_KEYS,
     ARM_MODE_ACTION_KEYS,
+    CLOSURE_ACTION_KEYS,
+    CLOSURE_ARM_MODE_ACTION_KEYS,
     G1_23_INVALID_SDK_SLOTS,
     HAND_LIMIT_RAD,
+    HAND_SIDES,
     HEAD_HAND_KEYS,
     HEAD_HAND_MOTORS,
     HEAD_LIMITS_RAD,
@@ -53,7 +56,10 @@ from .g1_ah_joints import (
     MIDDLE_POS_DEG,
     MODE_MACHINE_BY_REVISION,
     ROBOT_TYPE_BASE,
+    closure_to_hand_q,
+    hand_closure_key,
     hand_motor_names,
+    hand_q_to_closure,
     key_to_motor_name,
 )
 from .g1_ah_zmq import HeadHandZmqClient
@@ -83,8 +89,12 @@ class UnitreeG1Ah(UnitreeG1):
         self._invalid_slots = np.array(G1_23_INVALID_SDK_SLOTS)
 
     @property
+    def _hand_closure(self) -> bool:
+        return self.config.hand_representation == "closure"
+
+    @property
     def _motors_ft(self) -> dict[str, type]:
-        return dict.fromkeys(ALL_ACTION_KEYS, float)
+        return dict.fromkeys(CLOSURE_ACTION_KEYS if self._hand_closure else ALL_ACTION_KEYS, float)
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
@@ -93,8 +103,10 @@ class UnitreeG1Ah(UnitreeG1):
     @cached_property
     def action_features(self) -> dict[str, type]:
         if self.controller is None:
-            return dict.fromkeys(ALL_ACTION_KEYS, float)
-        return dict.fromkeys(ARM_MODE_ACTION_KEYS, float)
+            return self._motors_ft
+        return dict.fromkeys(
+            CLOSURE_ARM_MODE_ACTION_KEYS if self._hand_closure else ARM_MODE_ACTION_KEYS, float
+        )
 
     def publish_lowcmd(
         self,
@@ -308,11 +320,28 @@ class UnitreeG1Ah(UnitreeG1):
                 ticks = self._headhand_ticks[name]
                 obs[f"{name}.q"] = ticks_to_rad(model, ticks, self.calibration[name])
 
+        if self._hand_closure:
+            for side in HAND_SIDES:
+                keys = [f"{name}.q" for name in hand_motor_names(side)]
+                if all(key in obs for key in keys):
+                    obs[hand_closure_key(side)] = hand_q_to_closure(side, [obs[key] for key in keys])
+
         return obs
 
     def send_action(self, action: RobotAction) -> RobotAction:
+        closures: dict[str, float] = {}
+        if self._hand_closure:
+            action = dict(action)
+            for side in HAND_SIDES:
+                key = hand_closure_key(side)
+                if key in action:
+                    closures[key] = min(max(float(action.pop(key)), 0.0), 1.0)
+                    q = closure_to_hand_q(side, closures[key])
+                    action.update(zip((f"{name}.q" for name in hand_motor_names(side)), q, strict=True))
+
         body_action = {k: v for k, v in action.items() if k not in _HEAD_HAND_KEY_SET}
         sent = super().send_action(body_action)
+        sent.update(closures)
 
         goals: dict[str, int] = {}
         for key in HEAD_HAND_KEYS:
