@@ -22,7 +22,9 @@ import pytest
 
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
+    BODY_KEYS,
     HAND_CLOSURE_KEYS,
+    HEAD_KEYS,
     TELEOP_ACTION_KEYS,
     closure_to_hand_q,
     default_action,
@@ -295,6 +297,84 @@ def test_initial_closure_seeds_hand_blend():
     assert [action[f"{name}.q"] for name in hand_motor_names("left")] == pytest.approx(
         hand_pose_rad("left", True)
     )
+
+
+def _measured_obs(hand_closure=0.3):
+    obs = {key: 0.05 * (i + 1) for i, key in enumerate(BODY_KEYS)}
+    obs.update({"xl330_joint.q": 0.2, "d455_joint.q": -0.3})
+    for side in ("left", "right"):
+        obs.update(
+            zip(
+                (f"{name}.q" for name in hand_motor_names(side)),
+                closure_to_hand_q(side, hand_closure),
+                strict=True,
+            )
+        )
+    return obs
+
+
+def test_first_feedback_sets_targets_to_measured_pose(teleop):
+    obs = _measured_obs(hand_closure=0.3)
+    teleop.send_feedback(obs)
+    action = teleop.get_action()
+    for key in (*BODY_KEYS, *HEAD_KEYS):
+        assert action[key] == pytest.approx(obs[key])
+    for side in ("left", "right"):
+        assert action[f"{side}_hand.closure"] == pytest.approx(0.3)
+        assert [action[f"{name}.q"] for name in hand_motor_names(side)] == pytest.approx(
+            closure_to_hand_q(side, 0.3)
+        )
+
+
+def test_feedback_closure_keys_take_precedence_over_motor_angles(teleop):
+    obs = _measured_obs(hand_closure=0.3)
+    obs["right_hand.closure"] = 0.8
+    teleop.send_feedback(obs)
+    assert teleop.get_action()["right_hand.closure"] == pytest.approx(0.8)
+
+
+def test_feedback_is_latched_once(teleop):
+    first = _measured_obs()
+    teleop.send_feedback(first)
+    teleop.send_feedback(dict.fromkeys(first, -1.0))
+    action = teleop.get_action()
+    for key in BODY_KEYS:
+        assert action[key] == pytest.approx(first[key])
+
+
+def test_feedback_without_full_body_is_ignored(teleop):
+    teleop.send_feedback({"kLeftElbow.q": 1.2})
+    assert teleop.get_action()["kLeftElbow.q"] == 0.0
+    teleop.send_feedback(_measured_obs())
+    assert teleop.get_action()["kLeftElbow.q"] == pytest.approx(_measured_obs()["kLeftElbow.q"])
+
+
+def test_initial_positions_win_over_feedback():
+    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
+        t = UnitreeG1AhGamepadTeleop(
+            UnitreeG1AhGamepadTeleopConfig(initial_positions={"kLeftElbow.q": 0.5, "left_hand.closure": 1.0})
+        )
+        t.connect()
+        t.send_feedback(_measured_obs(hand_closure=0.3))
+        action = t.get_action()
+        t.disconnect()
+    assert action["kLeftElbow.q"] == 0.5
+    assert action["left_hand.closure"] == pytest.approx(1.0)
+    assert action["right_hand.closure"] == pytest.approx(0.3)
+    assert action["kRightElbow.q"] == pytest.approx(_measured_obs()["kRightElbow.q"])
+
+
+def test_dpad_moves_head_from_measured_pose(teleop):
+    obs = _measured_obs()
+    clock = {"t": 0.0}
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        teleop.send_feedback(obs)
+        teleop.get_action()
+        teleop.gamepad.buttons.add(teleop.config.layout.dpad_up)
+        clock["t"] += 0.1
+        action = teleop.get_action()
+    assert action["d455_joint.q"] == pytest.approx(obs["d455_joint.q"] + teleop.config.head_speed_rad_s * 0.1)
+    assert action["xl330_joint.q"] == pytest.approx(obs["xl330_joint.q"])
 
 
 def test_body_keys_never_change(teleop):

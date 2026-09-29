@@ -321,6 +321,12 @@ lerobot-teleoperate \
 
 ### Controls (default preset `dualshock4_hidapi`)
 
+The teleop starts from the robot's measured pose: the first observation sets the body and head
+targets and each hand's closure, so the first recorded action matches `observation.state` and
+nothing moves at connect. Joints without a gamepad control (arms, and legs/waist without a
+controller) keep that pose. `--teleop.initial_positions='{"kLeftElbow.q": 1.2, ...}'` pins
+chosen keys to fixed values instead.
+
 | Input                   | Action                                                                                         |
 | ----------------------- | ---------------------------------------------------------------------------------------------- |
 | D-pad left/right        | Head pan (rate `head_speed_rad_s`, default 0.8 rad/s)                                          |

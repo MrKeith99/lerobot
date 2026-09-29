@@ -17,10 +17,12 @@
 """Hardware-light gamepad teleoperator for the UnitreeG1Ah robot.
 
 Emits every key in `TELEOP_ACTION_KEYS` on every `get_action()` call: held body/hand
-poses, D-pad-driven head targets, an RB/LB-blended hand open/close (per-servo targets
-plus `{side}_hand.closure` in [0, 1]), the 4 `REMOTE_AXES` driven by the sticks and the
-16 `REMOTE_BUTTONS`, of which the L2/R2 triggers drive the locomotion controller's waist raise/lower slots. All motion is
-time-based (rad/s, blend/s) so behaviour does not depend on the calling loop's fps.
+poses (taken from the robot's first observation via `send_feedback`, else `default_action()`),
+D-pad-driven head targets, an RB/LB-blended hand open/close (per-servo targets plus
+`{side}_hand.closure` in [0, 1]), the 4 `REMOTE_AXES` driven by the sticks and the 16
+`REMOTE_BUTTONS`, of which the L2/R2 triggers drive the locomotion controller's waist
+raise/lower slots. All motion is time-based (rad/s, blend/s) so behaviour does not depend on
+the calling loop's fps.
 """
 
 from __future__ import annotations
@@ -33,14 +35,17 @@ from lerobot.lerobot_types import RobotAction
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
+    BODY_KEYS,
     HAND_CLOSURE_KEYS,
     HAND_SIDES,
+    HEAD_KEYS,
     HEAD_LIMITS_RAD,
     TELEOP_ACTION_KEYS,
     default_action,
     hand_closure_key,
     hand_motor_names,
     hand_pose_rad,
+    hand_q_to_closure,
 )
 from lerobot.utils.decorators import check_if_not_connected
 
@@ -82,6 +87,7 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
             side: min(max(self._target[hand_closure_key(side)], 0.0), 1.0) for side in HAND_SIDES
         }
         self._last_t: float | None = None
+        self._synced_to_robot = False
         self._open = {side: hand_pose_rad(side, False) for side in ("left", "right")}
         self._closed = {side: hand_pose_rad(side, True) for side in ("left", "right")}
 
@@ -123,7 +129,27 @@ class UnitreeG1AhGamepadTeleop(Teleoperator):
         pass
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:
-        pass
+        """Start from the robot's measured pose: the first observation with every body joint sets the
+        body/head targets and the hand closures, except keys pinned by `initial_positions`."""
+        if self._synced_to_robot or not all(key in feedback for key in BODY_KEYS):
+            return
+        pinned = set(self.config.initial_positions or ())
+        for key in BODY_KEYS + HEAD_KEYS:
+            if key in feedback and key not in pinned:
+                self._target[key] = float(feedback[key])
+        for side in HAND_SIDES:
+            key = hand_closure_key(side)
+            motor_keys = [f"{name}.q" for name in hand_motor_names(side)]
+            if key in pinned:
+                continue
+            if key in feedback:
+                closure = float(feedback[key])
+            elif all(motor_key in feedback for motor_key in motor_keys):
+                closure = hand_q_to_closure(side, [float(feedback[motor_key]) for motor_key in motor_keys])
+            else:
+                continue
+            self._hand_blend[side] = min(max(closure, 0.0), 1.0)
+        self._synced_to_robot = True
 
     def _step_head(self, dt: float) -> None:
         hx, hy = self.gamepad.hat()

@@ -32,7 +32,9 @@ if not _unitree_sdk_available:
 
 from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
     ALL_ACTION_KEYS,
+    ARM_KEYS,
     ARM_MODE_ACTION_KEYS,
+    BODY_KEYS,
     CLOSURE_ACTION_KEYS,
     CLOSURE_ARM_MODE_ACTION_KEYS,
     HAND_CLOSURE_KEYS,
@@ -193,5 +195,30 @@ class TestG1AhRecordLoopIntegration:
                 obs_names = ds_features["observation.state"]["names"]
                 assert obs_frame[obs_names.index("right_hand.closure")] == pytest.approx(1.0, abs=0.02)
                 assert obs_frame[obs_names.index("left_hand.closure")] == pytest.approx(0.0, abs=0.02)
+            finally:
+                robot.disconnect()
+
+    @pytest.mark.parametrize("controller", [None, "GrootLocomotionController"])
+    def test_first_recorded_action_matches_measured_pose(self, headhand_server, teleop, tmp_path, controller):
+        mocks = _make_sdk_mocks(mode_machine=4)
+        stub = _make_stub_controller() if controller else None
+        patches, *_ = _make_g1ah(mocks, controller=stub)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            robot = _new_robot(headhand_server, mocks, tmp_path, config_kwargs={"controller": controller})
+            robot.connect(calibrate=False)
+            try:
+                ds_features = _dataset_features(robot)
+                obs = robot.get_observation()
+                teleop.send_feedback(obs)
+                act = teleop.get_action()
+                act_frame = build_dataset_frame(ds_features, act, ACTION)[ACTION]
+                obs_frame = build_dataset_frame(ds_features, obs, OBS_STR)["observation.state"]
+                act_names = ds_features[ACTION]["names"]
+                obs_names = ds_features["observation.state"]["names"]
+                for key in ARM_KEYS if controller else BODY_KEYS:
+                    assert act_frame[act_names.index(key)] == pytest.approx(obs_frame[obs_names.index(key)])
+                assert any(abs(obs[key]) > 0.1 for key in ARM_KEYS)
             finally:
                 robot.disconnect()
