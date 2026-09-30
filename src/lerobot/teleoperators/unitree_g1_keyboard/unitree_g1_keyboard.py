@@ -32,7 +32,8 @@ from .keyboard_input import UnitreeG1KeyboardInput
 class UnitreeG1KeyboardTeleop(UnitreeG1GamepadTeleop):
     """Keyboard teleoperator emitting the full Unitree G1 teleop action space (`TELEOP_ACTION_KEYS`).
 
-    The 16 `REMOTE_BUTTONS` are always zero here: no keys are bound to the waist triggers.
+    t / g stand in for the gamepad's L2 / R2: they raise / lower `kBaseHeight.cmd` and set the
+    locomotion controller's waist raise/lower `REMOTE_BUTTONS` slots.
     """
 
     config_class = UnitreeG1KeyboardTeleopConfig
@@ -47,6 +48,7 @@ class UnitreeG1KeyboardTeleop(UnitreeG1GamepadTeleop):
         print("  q / e: hold to close left / right hand")
         print("  w/s, a/d: forward / sideways (kNavVx / kNavVy, left stick)")
         print("  i/k, j/l: remote.ry / remote.rx (right stick)")
+        print("  t / g: hold to raise / lower base height (GrootLocomotionController)")
         print("  y / n / r: end episode success / failure / rerecord")
         print("  space: hold for intervention")
         print("  Esc: stop")

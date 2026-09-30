@@ -33,6 +33,8 @@ Key mapping:
         layout's `left_y` / `left_x` indices, using pygame's sign convention
         (y axes point down: w -> negative, s -> positive).
     i/k, j/l: `remote.ry` / `remote.rx`, same convention at `right_y` / `right_x`.
+    t / g: held -> raise / lower the base height, read through `axis()` at the config layout's
+        `trigger_left` / `trigger_right` indices (the gamepad's L2 / R2).
     y / n / r: latch SUCCESS / FAILURE / RERECORD_EPISODE while held, cleared on release.
     space: held -> intervention.
     Esc: stop the listener (`is_running` becomes False).
@@ -70,6 +72,7 @@ _WINDOW_HELP = (
     "Unitree G1 keyboard teleop - keep this window focused",
     "arrows: head pan/tilt      q / e: close left / right hand",
     "w a s d: left stick         i j k l: right stick",
+    "t / g: raise / lower base height",
     "y / n / r: success / failure / rerecord   space: intervene",
     "Esc: stop",
 )
@@ -282,6 +285,10 @@ class UnitreeG1KeyboardInput:
             return (value if "l" in pressed else 0.0) - (value if "j" in pressed else 0.0)
         if index == layout.right_y:
             return (value if "k" in pressed else 0.0) - (value if "i" in pressed else 0.0)
+        if index == layout.trigger_left:
+            return 1.0 if "t" in pressed else 0.0
+        if index == layout.trigger_right:
+            return 1.0 if "g" in pressed else 0.0
         return 0.0
 
     def should_intervene(self) -> bool:

@@ -141,6 +141,17 @@ def test_axis_sign_convention_right_stick(keyboard_input):
     assert keyboard_input.axis(layout.right_x) == pytest.approx(value)
 
 
+def test_t_g_are_the_height_triggers(keyboard_input):
+    layout = keyboard_input.config.layout
+    assert keyboard_input.axis(layout.trigger_left) == 0.0
+    assert keyboard_input.axis(layout.trigger_right) == 0.0
+    keyboard_input.press("t")
+    assert keyboard_input.axis(layout.trigger_left) > 0.0
+    keyboard_input.release("t")
+    keyboard_input.press("g")
+    assert keyboard_input.axis(layout.trigger_right) > 0.0
+
+
 def test_episode_events_latched_until_release(keyboard_input):
     assert keyboard_input.get_episode_end_status() is None
     keyboard_input.press("y")
@@ -265,6 +276,26 @@ def test_e_held_closes_right_hand(teleop):
         for name in amazing_hand_motor_names("left"):
             key = f"{name}.q"
             assert action[key] == pytest.approx(default[key])
+
+
+def test_t_raises_and_g_lowers_base_height(teleop):
+    clock = {"t": 0.0}
+    with patch(f"{_PARENT_MODULE}.time.perf_counter", lambda: clock["t"]):
+        start = teleop.get_action()["kBaseHeight.cmd"]
+        teleop.gamepad.press("t")
+        for _ in range(20):
+            clock["t"] += 0.05
+            action = teleop.get_action()
+        assert action["kBaseHeight.cmd"] == pytest.approx(start + 0.05, abs=1e-6)  # 0.05 m/s for 1 s
+        assert action["remote.button.0"] == 1.0
+        teleop.gamepad.release("t")
+
+        teleop.gamepad.press("g")
+        for _ in range(400):
+            clock["t"] += 0.05
+            action = teleop.get_action()
+        assert action["kBaseHeight.cmd"] == pytest.approx(0.5, abs=1e-6)  # clamped at the range minimum
+        assert action["remote.button.4"] == 1.0
 
 
 def test_w_gives_positive_remote_ly(teleop):
