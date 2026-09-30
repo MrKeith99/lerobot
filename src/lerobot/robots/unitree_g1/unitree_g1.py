@@ -627,8 +627,9 @@ class UnitreeG1(Robot):
                 # Force-kill the image publish subprocess first to avoid long waits
                 if hasattr(self.sim_env, "simulator") and hasattr(self.sim_env.simulator, "sim_env"):
                     sim_env_inner = self.sim_env.simulator.sim_env
-                    if hasattr(sim_env_inner, "image_publish_process"):
-                        proc = sim_env_inner.image_publish_process
+                    # None when the sim publishes no images (UNITREE_G1_MUJOCO_PUBLISH_IMAGES=0)
+                    proc = getattr(sim_env_inner, "image_publish_process", None)
+                    if proc is not None:
                         if proc.process and proc.process.is_alive():
                             logger.info("Force-terminating image publish subprocess...")
                             proc.stop_event.set()

@@ -198,6 +198,20 @@ def test_start_without_pynput_logs_warning_and_runs_with_no_keys(caplog):
     assert "cannot capture" in caplog.text
     assert ki.hat() == (0, 0)
     assert ki.is_running
+    # As the warning says, keys forwarded in-process (e.g. from the MuJoCo viewer) still arrive.
+    from lerobot.teleoperators.unitree_g1_keyboard import keyboard_input as kb
+
+    try:
+        kb.external_key_event("e")
+        ki.update()
+        assert ki.button(ki.config.layout.button_rb)
+    finally:
+        ki.stop()
+
+
+def test_unknown_backend_raises():
+    with pytest.raises(ValueError, match="backend"):
+        UnitreeG1KeyboardInput(UnitreeG1KeyboardTeleopConfig(backend="evdev")).start()
 
 
 # ── Teleop-level tests (FakeInput-patched, mirroring the gamepad test suite) ──

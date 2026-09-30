@@ -339,6 +339,19 @@ def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
     assert seen_env == dict(zip(embodiment_vars, ("29dof", "rubber_hand", "fixed", "d435i"), strict=True))
 
 
+def test_disconnect_closes_sim_without_image_publisher(unitree_g1, caplog):
+    """With image publishing off the sim has image_publish_process=None; disconnect still closes it."""
+    robot, _ = unitree_g1
+    sim_env = MagicMock()
+    sim_env.simulator.sim_env.image_publish_process = None
+    robot.sim_env = sim_env
+    with caplog.at_level("WARNING"):
+        robot.disconnect()
+    sim_env.close.assert_called_once()
+    assert "Error closing sim_env" not in caplog.text
+    assert robot.sim_env is None
+
+
 def _attach_fake_sim(robot, pressed: set[int], band_enabled: bool = False, num_buttons: int = 13):
     """Give the robot a fake MuJoCo env: elastic band, bridge low_cmd and a joystick with `pressed` buttons."""
     band = MagicMock()

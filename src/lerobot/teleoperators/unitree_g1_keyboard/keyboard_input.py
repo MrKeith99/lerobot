@@ -129,15 +129,17 @@ class UnitreeG1KeyboardInput:
 
     def start(self) -> None:
         backend = self.config.backend
+        if backend not in ("window", "pynput", "external"):
+            raise ValueError(f"Unknown keyboard backend {backend!r}; use 'window', 'pynput' or 'external'")
+        # Every backend also takes keys forwarded in-process (`external_key_event`, e.g. from the MuJoCo
+        # viewer window); "external" takes only those.
+        with _ACTIVE_LOCK:
+            _ACTIVE_INPUTS.add(self)
         if backend == "external":
-            with _ACTIVE_LOCK:
-                _ACTIVE_INPUTS.add(self)
             return
         if backend == "window":
             self._open_window()
             return
-        if backend != "pynput":
-            raise ValueError(f"Unknown keyboard backend {backend!r}; use 'window', 'pynput' or 'external'")
         if pynput_keyboard is None or not pynput_can_capture():
             logging.warning(
                 "pynput cannot capture keys in this session (Wayland/headless). Keys are only taken "
