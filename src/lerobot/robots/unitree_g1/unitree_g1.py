@@ -629,14 +629,13 @@ class UnitreeG1(Robot):
                     sim_env_inner = self.sim_env.simulator.sim_env
                     # None when the sim publishes no images (UNITREE_G1_MUJOCO_PUBLISH_IMAGES=0)
                     proc = getattr(sim_env_inner, "image_publish_process", None)
-                    if proc is not None:
-                        if proc.process and proc.process.is_alive():
-                            logger.info("Force-terminating image publish subprocess...")
-                            proc.stop_event.set()
-                            proc.process.terminate()
-                            proc.process.join(timeout=1)
-                            if proc.process.is_alive():
-                                proc.process.kill()
+                    if proc is not None and proc.process and proc.process.is_alive():
+                        logger.info("Force-terminating image publish subprocess...")
+                        proc.stop_event.set()
+                        proc.process.terminate()
+                        proc.process.join(timeout=1)
+                        if proc.process.is_alive():
+                            proc.process.kill()
                 self.sim_env.close()
             except Exception as e:
                 logger.warning(f"Error closing sim_env: {e}")
