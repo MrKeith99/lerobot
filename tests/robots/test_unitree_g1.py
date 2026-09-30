@@ -322,7 +322,9 @@ def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
     fake_inner_env.simulator = None  # no elastic band / bridge joystick to poll
     fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
 
-    embodiment_vars = ("UNITREE_G1_MUJOCO_BODY", "UNITREE_G1_MUJOCO_END_EFFECTOR", "UNITREE_G1_MUJOCO_HEAD")
+    embodiment_vars = tuple(
+        f"UNITREE_G1_MUJOCO_{name}" for name in ("BODY", "END_EFFECTOR", "HEAD_MOUNT", "HEAD_SENSOR")
+    )
     seen_env = {}
 
     def fake_make_env(*args, **kwargs):
@@ -334,7 +336,7 @@ def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
         mock_make_env.assert_called_once_with(robot.config.sim_env_repo_id, trust_remote_code=True)
         assert robot.sim_env is fake_inner_env
     # The sim gets the embodiment through its environment variables
-    assert seen_env == dict(zip(embodiment_vars, ("29dof", "rubber_hand", "none"), strict=True))
+    assert seen_env == dict(zip(embodiment_vars, ("29dof", "rubber_hand", "fixed", "d435i"), strict=True))
 
 
 def _attach_fake_sim(robot, pressed: set[int], band_enabled: bool = False, num_buttons: int = 13):

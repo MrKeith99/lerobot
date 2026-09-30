@@ -398,7 +398,7 @@ class TestDex3Robot:
             assert isinstance(robot.dex_hand, DexHandDriver)
             assert robot.dex_hand.spec is DEX3
             assert robot.headhand is None
-            assert robot.name == "unitree_g1_29dof_dex3"
+            assert robot.name == "unitree_g1-29dof-dex3-fixed-d435i"
             assert list(robot.action_features) == [*BODY_KEYS, *HAND_CLOSURE_KEYS]
             assert robot.is_calibrated
             robot.calibrate()  # no head/hand bridge: nothing to calibrate

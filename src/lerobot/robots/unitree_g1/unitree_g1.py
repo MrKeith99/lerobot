@@ -363,7 +363,7 @@ class UnitreeG1(Robot):
     @property
     def _head_hand_ft(self) -> dict[str, type]:
         """Head joints, then the hand closures or joints."""
-        keys = HEAD_KEYS if self.config.head != "none" else ()
+        keys = HEAD_KEYS if self.config.head_mount == "pan_tilt" else ()
         if self.hand_spec is not None:
             keys += HAND_CLOSURE_KEYS if self._hand_closure else self.hand_spec.joint_keys()
         return dict.fromkeys(keys, float)
@@ -515,7 +515,8 @@ class UnitreeG1(Robot):
             embodiment = {
                 "UNITREE_G1_MUJOCO_BODY": self.config.body,
                 "UNITREE_G1_MUJOCO_END_EFFECTOR": self.config.end_effector,
-                "UNITREE_G1_MUJOCO_HEAD": self.config.head,
+                "UNITREE_G1_MUJOCO_HEAD_MOUNT": self.config.head_mount,
+                "UNITREE_G1_MUJOCO_HEAD_SENSOR": self.config.head_sensor,
             }
             with _env_vars(embodiment):
                 self._env_wrapper = make_env(self.config.sim_env_repo_id, trust_remote_code=True)
@@ -869,7 +870,7 @@ class UnitreeG1(Robot):
 
     def _reset_head_hand(self, control_dt: float, total_time: float = 2.0) -> None:
         """Ramp the head and hand joints to their default positions."""
-        keys = list(HEAD_KEYS) if self.config.head != "none" else []
+        keys = list(HEAD_KEYS) if self.config.head_mount == "pan_tilt" else []
         keys += list(self.hand_spec.joint_keys()) if self.hand_spec is not None else []
         if not keys:
             return

@@ -320,26 +320,29 @@ lerobot-rollout \
 
 ## Part 5: Embodiments
 
-One robot type, `unitree_g1`, covers every G1 variant. Pick the body, end effector and head with
-three config fields, the same options as the MuJoCo sim's `BODY` / `END_EFFECTOR` / `HEAD`:
+One robot type, `unitree_g1`, covers every G1 variant. Pick the body, end effector, head mount and
+head sensor with four config fields, the same options as the MuJoCo sim's `BODY` / `END_EFFECTOR` /
+`HEAD_MOUNT` / `HEAD_SENSOR`:
 
 | Field                  | Values                                                                                                                                                                                                                     |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--robot.body`         | `29dof` (default), `23dof` (no waist roll/pitch, no wrist pitch/yaw)                                                                                                                                                       |
 | `--robot.end_effector` | `rubber_hand` (default, Unitree's stock passive hand), `none` (bare wrist), `dex1` (Unitree Dex1-1 gripper), `dex3` (Unitree Dex3-1 hand), `amazing_hand` (Pollen Robotics AmazingHand, 8 Feetech SCS0009 servos per hand) |
-| `--robot.head`         | `none` (default), `d455_pan_tilt` (Dynamixel XL330 pan/tilt carrying an Intel RealSense D455)                                                                                                                              |
+| `--robot.head_mount`   | `fixed` (default, the stock head), `pan_tilt` (Dynamixel XL330 pan/tilt)                                                                                                                                                   |
+| `--robot.head_sensor`  | `d435i` (default, the stock Intel RealSense D435i), `d455` (Intel RealSense D455)                                                                                                                                          |
 
-Any combination works: every end effector mounts on either body, with or without the head.
-`rubber_hand` and `none` have no joints, so they add nothing to the recorded features. The dataset
-`robot_type` and the calibration id are derived from the three, leaving out the stock rubber hand
-and fixed head, e.g. `unitree_g1_29dof`, `unitree_g1_23dof_dex3`, `unitree_g1_29dof_no_hand` or
-`unitree_g1_23dof_amazing_hand_d455_pan_tilt`.
+Any combination works: every end effector mounts on either body, and any sensor on either head
+mount. `rubber_hand` and `none` have no joints, so they add nothing to the recorded features. The
+dataset `robot_type` and the calibration id are `unitree_g1-<body>-<end_effector>-<head_mount>-<head_sensor>`,
+every field always present (the 23dof body with its `--robot.revision`), so `robot_type.split("-")`
+recovers them, e.g. `unitree_g1-29dof-rubber_hand-fixed-d435i` (a stock G1),
+`unitree_g1-23dof_rev_1_0-dex3-fixed-d435i` or `unitree_g1-23dof_rev_1_0-amazing_hand-pan_tilt-d455`.
 
-| Embodiment                      | How the extras are driven                                                                    |
-| ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `dex3`                          | DDS `rt/dex3/{left,right}/{cmd,state}` (`HandCmd_` / `HandState_`), 7 joints per hand        |
-| `dex1`                          | DDS `rt/dex1/{left,right}/{cmd,state}` (`MotorCmds_` / `MotorStates_`), 1 position per side  |
-| `amazing_hand`, `d455_pan_tilt` | head/hand ZMQ bridge (ports 6002/6003) to the Feetech hand bus and/or the Dynamixel head bus |
+| Embodiment                 | How the extras are driven                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------- |
+| `dex3`                     | DDS `rt/dex3/{left,right}/{cmd,state}` (`HandCmd_` / `HandState_`), 7 joints per hand        |
+| `dex1`                     | DDS `rt/dex1/{left,right}/{cmd,state}` (`MotorCmds_` / `MotorStates_`), 1 position per side  |
+| `amazing_hand`, `pan_tilt` | head/hand ZMQ bridge (ports 6002/6003) to the Feetech hand bus and/or the Dynamixel head bus |
 
 ### Joint layout
 
@@ -433,7 +436,7 @@ Only the head/hand bridge motors need calibration (the body and Dex hands report
 
 ```bash
 lerobot-calibrate \
-  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head=d455_pan_tilt \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head_mount=pan_tilt --robot.head_sensor=d455 \
   --robot.is_simulation=false --robot.robot_ip=192.168.123.164 --robot.id=lab_g1
 ```
 
@@ -448,7 +451,7 @@ The calibration is written to
 `~/.cache/huggingface/lerobot/calibration/robots/<robot_type>/<id>.json`. Calibration files that use
 the pre-rename motor names (`xl330_joint`, `d455_joint`, `{side}_hand_finger{i}_motor{j}`) are
 renamed on load. A calibration made with the former `unitree_g1_23dof_ah8_d455_2dof` robot type
-can be moved to `.../robots/unitree_g1_23dof_amazing_hand_d455_pan_tilt/`.
+can be moved to `.../robots/unitree_g1-23dof_rev_1_0-amazing_hand-pan_tilt-d455/`.
 
 ### Teleoperate with a gamepad or the keyboard
 
@@ -459,7 +462,7 @@ robot keeps the keys it has. They start from the robot's measured pose, so nothi
 
 ```bash
 lerobot-record \
-  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head=d455_pan_tilt \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head_mount=pan_tilt --robot.head_sensor=d455 \
   --robot.is_simulation=false --robot.robot_ip=192.168.123.164 --robot.id=lab_g1 \
   --robot.controller=GrootLocomotionController \
   --robot.cameras='{"head_camera": {"type": "zmq", "server_address": "192.168.123.164", "port": 5555, "camera_name": "head_camera", "width": 640, "height": 480, "fps": 30}}' \
@@ -492,7 +495,7 @@ globally on X11.
 
 [`k-valentin/unitree-g1-mujoco`](https://huggingface.co/k-valentin/unitree-g1-mujoco), the default
 `--robot.sim_env_repo_id`, composes every combination at load time; the robot passes its embodiment
-to it as `UNITREE_G1_MUJOCO_BODY` / `_END_EFFECTOR` / `_HEAD`. On the 23dof body a hand sits where it
+to it as `UNITREE_G1_MUJOCO_BODY` / `_END_EFFECTOR` / `_HEAD_MOUNT` / `_HEAD_SENSOR`. On the 23dof body a hand sits where it
 would on a 29dof arm with its wrist pitch/yaw at zero; the Dex and AmazingHand mounts on the other
 body are placeholders until there is adapter CAD. With the head or the AmazingHand the sim runs the
 same head/hand ZMQ bridge on localhost as the Jetson, and writes a default head/hand calibration.
@@ -501,7 +504,7 @@ same head/hand ZMQ bridge on localhost as the Jetson, and writes a default head/
 # 23dof + AmazingHand + pan/tilt D455 with the gamepad. PS toggles the elastic band; the sim reset
 # moves to Share (8) because Options (9) is the gamepad's intervention button.
 lerobot-teleoperate \
-  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head=d455_pan_tilt \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head_mount=pan_tilt --robot.head_sensor=d455 \
   --robot.is_simulation=true --robot.id=sim --robot.sim_reset_button=8 \
   --teleop.type=unitree_g1_gamepad \
   --robot.cameras='{"head": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"head_camera","width":640,"height":480,"fps":30,"warmup_s":5}}' \

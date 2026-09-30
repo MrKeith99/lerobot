@@ -54,8 +54,13 @@ from lerobot.robots.unitree_g1.headhand_devices import (
 from lerobot.robots.unitree_g1.heads import HEAD_KEYS, HEAD_LIMITS_RAD, HEAD_MOTORS
 from tests.mocks.mock_unitree_g1_headhand_server import MockHeadHandServer
 
-AH_EMBODIMENT = {"body": "23dof", "end_effector": "amazing_hand", "head": "d455_pan_tilt"}
-AH_ROBOT_TYPE = "unitree_g1_23dof_amazing_hand_d455_pan_tilt"
+AH_EMBODIMENT = {
+    "body": "23dof",
+    "end_effector": "amazing_hand",
+    "head_mount": "pan_tilt",
+    "head_sensor": "d455",
+}
+AH_ROBOT_TYPE = "unitree_g1-23dof_rev_1_0-amazing_hand-pan_tilt-d455"
 
 
 def _ah_config(**kwargs) -> UnitreeG1Config:
@@ -188,8 +193,8 @@ class TestAmazingHandIdentity:
             for p in patches:
                 stack.enter_context(p)
             robot = _new_robot(headhand_server, mocks, tmp_path, config_kwargs={"revision": revision})
-            assert robot.name == AH_ROBOT_TYPE
-            assert robot.config.robot_type == AH_ROBOT_TYPE
+            expected = f"unitree_g1-23dof_{revision}-amazing_hand-pan_tilt-d455"
+            assert robot.name == robot.config.robot_type == expected
             assert str(tmp_path) in str(robot.calibration_dir) or robot.calibration_dir == tmp_path
             assert robot.dex_hand is None
             assert set(robot.headhand.motors) == set(HEAD_HAND_MOTORS)

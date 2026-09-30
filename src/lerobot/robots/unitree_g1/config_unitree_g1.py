@@ -22,7 +22,7 @@ from ..config import RobotConfig
 from .end_effectors import AMAZING_HAND_MOTORS, END_EFFECTORS, HAND_REPRESENTATIONS, HAND_SIDES, HAND_SPECS
 from .g1_utils import BODIES, G1_LEG_SLOTS, REVISIONS, invalid_sdk_slots
 from .headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT
-from .heads import DEFAULT_HEAD_Q, HEAD_MOTORS, HEADS
+from .heads import DEFAULT_HEAD_Q, HEAD_MOTORS, HEAD_MOUNTS, HEAD_SENSORS
 
 _GAINS: dict[str, dict[str, list[float]]] = {
     "left_leg": {
@@ -51,13 +51,15 @@ _DEFAULT_KP, _DEFAULT_KD = _build_gains()
 @RobotConfig.register_subclass("unitree_g1")
 @dataclass
 class UnitreeG1Config(RobotConfig):
-    # Embodiment, mirroring the MuJoCo sim's BODY / END_EFFECTOR / HEAD options; any combination:
+    # Embodiment, mirroring the MuJoCo sim's BODY / END_EFFECTOR / HEAD_MOUNT / HEAD_SENSOR; any combination:
     # body "29dof" or "23dof" (no waist roll/pitch, no wrist pitch/yaw);
     # end_effector "rubber_hand" (stock passive hand), "none" (bare wrist), "dex1" (gripper),
-    # "dex3" (hand) or "amazing_hand"; head "none" or "d455_pan_tilt" (Dynamixel pan/tilt D455).
+    # "dex3" (hand) or "amazing_hand"; head_mount "fixed" (stock head) or "pan_tilt" (Dynamixel
+    # pan/tilt); head_sensor "d435i" (stock RealSense) or "d455".
     body: str = "29dof"
     end_effector: str = "rubber_hand"
-    head: str = "none"
+    head_mount: str = "fixed"
+    head_sensor: str = "d435i"
 
     # 23dof only: hardware revision, checked against the robot's reported mode_machine.
     revision: str = "rev_1_0"
@@ -126,7 +128,8 @@ class UnitreeG1Config(RobotConfig):
         for name, value, choices in (
             ("body", self.body, BODIES),
             ("end_effector", self.end_effector, END_EFFECTORS),
-            ("head", self.head, HEADS),
+            ("head_mount", self.head_mount, HEAD_MOUNTS),
+            ("head_sensor", self.head_sensor, HEAD_SENSORS),
             ("revision", self.revision, REVISIONS),
             ("hand_representation", self.hand_representation, HAND_REPRESENTATIONS),
         ):
@@ -136,8 +139,8 @@ class UnitreeG1Config(RobotConfig):
         if not (len(self.kp) == len(self.kd) == len(self.default_positions) == 29):
             raise ValueError("kp, kd and default_positions must all have length 29")
         if self.head_default_positions is None:
-            self.head_default_positions = list(DEFAULT_HEAD_Q) if self.head != "none" else []
-        expected_head = len(DEFAULT_HEAD_Q) if self.head != "none" else 0
+            self.head_default_positions = list(DEFAULT_HEAD_Q) if self.head_mount == "pan_tilt" else []
+        expected_head = len(DEFAULT_HEAD_Q) if self.head_mount == "pan_tilt" else 0
         if len(self.head_default_positions) != expected_head:
             raise ValueError(f"head_default_positions must have length {expected_head}")
         spec = HAND_SPECS.get(self.end_effector)
@@ -159,20 +162,17 @@ class UnitreeG1Config(RobotConfig):
 
     @property
     def robot_type(self) -> str:
-        """Embodiment name, used as the dataset `robot_type` and calibration id, e.g.
-        `unitree_g1_23dof_amazing_hand_d455_pan_tilt`. The stock rubber hand and fixed head are
-        left out; a bare wrist is `no_hand`."""
-        parts = ["unitree_g1", self.body]
-        if self.end_effector != "rubber_hand":
-            parts.append("no_hand" if self.end_effector == "none" else self.end_effector)
-        if self.head != "none":
-            parts.append(self.head)
-        return "_".join(parts)
+        """Embodiment name, used as the dataset `robot_type` and calibration id:
+        `unitree_g1-<body>-<end_effector>-<head_mount>-<head_sensor>`, every field always present and
+        free of "-", so `split("-")` recovers them. The 23dof body carries its revision, e.g.
+        `unitree_g1-23dof_rev_1_0-amazing_hand-pan_tilt-d455`, `unitree_g1-29dof-rubber_hand-fixed-d435i`."""
+        body = f"{self.body}_{self.revision}" if self.body == "23dof" else self.body
+        return "-".join(("unitree_g1", body, self.end_effector, self.head_mount, self.head_sensor))
 
     @property
     def headhand_motors(self) -> dict[str, tuple[int, str]]:
         """Motors behind the head/hand ZMQ bridge, {name: (ID, model)}; empty if there are none."""
-        motors = dict(HEAD_MOTORS) if self.head == "d455_pan_tilt" else {}
+        motors = dict(HEAD_MOTORS) if self.head_mount == "pan_tilt" else {}
         if self.end_effector == "amazing_hand":
             motors.update(AMAZING_HAND_MOTORS)
         return motors

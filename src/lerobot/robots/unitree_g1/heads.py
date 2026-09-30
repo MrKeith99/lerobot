@@ -14,16 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Head variants for the Unitree G1: the stock fixed head, or a 2-DoF Dynamixel pan/tilt D455 mount.
+"""Head variants for the Unitree G1: a mount (the stock fixed head, or a 2-DoF Dynamixel pan/tilt) carrying
+a sensor (the stock RealSense D435i, or a D455). Any sensor fits any mount.
 
 Pure stdlib: no hardware/SDK/bus imports here.
 """
 
 from __future__ import annotations
 
-HEADS: tuple[str, ...] = ("none", "d455_pan_tilt")
+HEAD_MOUNTS: tuple[str, ...] = ("fixed", "pan_tilt")
+HEAD_SENSORS: tuple[str, ...] = ("d435i", "d455")
 
-# d455_pan_tilt: two Dynamixel XL330-M288 servos, driven through the head/hand ZMQ bridge.
+# pan_tilt: two Dynamixel XL330-M288 servos, driven through the head/hand ZMQ bridge.
 HEAD_MOTORS: dict[str, tuple[int, str]] = {
     "kHeadYaw": (1, "xl330-m288"),
     "kHeadPitch": (2, "xl330-m288"),

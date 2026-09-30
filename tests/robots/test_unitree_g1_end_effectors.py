@@ -275,4 +275,5 @@ def test_head_limits_and_default():
     for name, q in zip(heads.HEAD_MOTORS, heads.DEFAULT_HEAD_Q, strict=True):
         low, high = heads.HEAD_LIMITS_RAD[name]
         assert low <= q <= high
-    assert heads.HEADS == ("none", "d455_pan_tilt")
+    assert heads.HEAD_MOUNTS == ("fixed", "pan_tilt")
+    assert heads.HEAD_SENSORS == ("d435i", "d455")

@@ -37,20 +37,24 @@ from lerobot.robots.unitree_g1.heads import DEFAULT_HEAD_Q, HEAD_KEYS
 from lerobot.teleoperators.unitree_g1_gamepad.unitree_g1_gamepad import TELEOP_ACTION_KEYS
 from lerobot.utils.feature_utils import build_dataset_frame, hw_to_dataset_features
 
-AH_EMBODIMENT = {"body": "23dof", "end_effector": "amazing_hand", "head": "d455_pan_tilt"}
+AH_EMBODIMENT = {
+    "body": "23dof",
+    "end_effector": "amazing_hand",
+    "head_mount": "pan_tilt",
+    "head_sensor": "d455",
+}
 
 VALID_EMBODIMENTS = [
-    ({"body": "29dof", "end_effector": "rubber_hand", "head": "none"}, "unitree_g1_29dof"),
-    ({"body": "23dof", "end_effector": "rubber_hand", "head": "none"}, "unitree_g1_23dof"),
-    ({"body": "29dof", "end_effector": "none", "head": "none"}, "unitree_g1_29dof_no_hand"),
-    ({"body": "29dof", "end_effector": "dex1", "head": "none"}, "unitree_g1_29dof_dex1"),
-    ({"body": "23dof", "end_effector": "dex3", "head": "none"}, "unitree_g1_23dof_dex3"),
-    ({"body": "29dof", "end_effector": "amazing_hand", "head": "none"}, "unitree_g1_29dof_amazing_hand"),
-    (
-        {"body": "29dof", "end_effector": "rubber_hand", "head": "d455_pan_tilt"},
-        "unitree_g1_29dof_d455_pan_tilt",
-    ),
-    (AH_EMBODIMENT, "unitree_g1_23dof_amazing_hand_d455_pan_tilt"),
+    ({}, "unitree_g1-29dof-rubber_hand-fixed-d435i"),
+    ({"body": "23dof"}, "unitree_g1-23dof_rev_1_0-rubber_hand-fixed-d435i"),
+    ({"body": "23dof", "revision": "base"}, "unitree_g1-23dof_base-rubber_hand-fixed-d435i"),
+    ({"end_effector": "none"}, "unitree_g1-29dof-none-fixed-d435i"),
+    ({"end_effector": "dex1"}, "unitree_g1-29dof-dex1-fixed-d435i"),
+    ({"body": "23dof", "end_effector": "dex3"}, "unitree_g1-23dof_rev_1_0-dex3-fixed-d435i"),
+    ({"end_effector": "amazing_hand"}, "unitree_g1-29dof-amazing_hand-fixed-d435i"),
+    ({"head_mount": "pan_tilt", "head_sensor": "d455"}, "unitree_g1-29dof-rubber_hand-pan_tilt-d455"),
+    ({"head_sensor": "d455"}, "unitree_g1-29dof-rubber_hand-fixed-d455"),
+    (AH_EMBODIMENT, "unitree_g1-23dof_rev_1_0-amazing_hand-pan_tilt-d455"),
 ]
 
 
@@ -77,7 +81,12 @@ def _robot(controller=None, **config_kwargs):
 class TestEmbodimentConfigDefaults:
     def test_defaults(self):
         cfg = UnitreeG1Config()
-        assert (cfg.body, cfg.end_effector, cfg.head) == ("29dof", "rubber_hand", "none")
+        assert (cfg.body, cfg.end_effector, cfg.head_mount, cfg.head_sensor) == (
+            "29dof",
+            "rubber_hand",
+            "fixed",
+            "d435i",
+        )
         assert cfg.revision == "rev_1_0"
         assert cfg.is_simulation is True
         assert cfg.headhand_state_port == HEADHAND_STATE_PORT
@@ -95,8 +104,17 @@ class TestEmbodimentConfigDefaults:
     def test_robot_type_per_embodiment(self, embodiment, robot_type):
         assert UnitreeG1Config(**embodiment).robot_type == robot_type
 
-    def test_robot_type_ignores_revision(self):
-        assert _ah_config(revision="base").robot_type == _ah_config(revision="rev_1_0").robot_type
+    def test_robot_type_splits_into_its_fields(self):
+        assert _ah_config().robot_type.split("-") == [
+            "unitree_g1",
+            "23dof_rev_1_0",
+            "amazing_hand",
+            "pan_tilt",
+            "d455",
+        ]
+
+    def test_robot_type_carries_the_23dof_revision(self):
+        assert _ah_config(revision="base").robot_type != _ah_config(revision="rev_1_0").robot_type
 
     def test_invalid_revision_raises(self):
         with pytest.raises(ValueError, match="revision"):
@@ -116,23 +134,26 @@ class TestEmbodimentConfigDefaults:
         assert len(_ah_config().headhand_motors) == 18
         assert UnitreeG1Config().headhand_motors == {}
         assert UnitreeG1Config(end_effector="dex3").headhand_motors == {}
-        assert set(UnitreeG1Config(head="d455_pan_tilt").headhand_motors) == {"kHeadYaw", "kHeadPitch"}
+        assert set(UnitreeG1Config(head_mount="pan_tilt").headhand_motors) == {"kHeadYaw", "kHeadPitch"}
+        assert UnitreeG1Config(head_sensor="d455").headhand_motors == {}
         assert len(UnitreeG1Config(end_effector="amazing_hand").headhand_motors) == 16
 
 
 class TestEmbodimentValidation:
     @pytest.mark.parametrize("body", ["29dof", "23dof"])
     @pytest.mark.parametrize("end_effector", ["rubber_hand", "none", "dex1", "dex3", "amazing_hand"])
-    @pytest.mark.parametrize("head", ["none", "d455_pan_tilt"])
-    def test_every_combination_is_valid(self, body, end_effector, head):
-        UnitreeG1Config(body=body, end_effector=end_effector, head=head)
+    @pytest.mark.parametrize("head_mount", ["fixed", "pan_tilt"])
+    @pytest.mark.parametrize("head_sensor", ["d435i", "d455"])
+    def test_every_combination_is_valid(self, body, end_effector, head_mount, head_sensor):
+        UnitreeG1Config(body=body, end_effector=end_effector, head_mount=head_mount, head_sensor=head_sensor)
 
     @pytest.mark.parametrize(
         "embodiment, match",
         [
             ({"body": "31dof"}, "body"),
             ({"end_effector": "gripper"}, "end_effector"),
-            ({"head": "fixed"}, "head"),
+            ({"head_mount": "d455_pan_tilt"}, "head_mount"),
+            ({"head_sensor": "zed"}, "head_sensor"),
         ],
     )
     def test_invalid_values_raise(self, embodiment, match):
@@ -162,8 +183,7 @@ class TestEmbodimentDefaultPositions:
         [("none", "29dof", 0), ("dex1", "29dof", 2), ("dex3", "29dof", 14), ("amazing_hand", "23dof", 16)],
     )
     def test_hand_default_positions_length_per_end_effector(self, end_effector, body, expected_len):
-        head = "d455_pan_tilt" if end_effector == "amazing_hand" else "none"
-        cfg = UnitreeG1Config(body=body, end_effector=end_effector, head=head)
+        cfg = UnitreeG1Config(body=body, end_effector=end_effector)
         assert len(cfg.hand_default_positions) == expected_len
 
     @pytest.mark.parametrize("end_effector", ["dex1", "dex3"])
@@ -264,7 +284,9 @@ class TestEmbodimentFeatures:
 
     def test_robot_name_is_robot_type(self):
         with _robot(**AH_EMBODIMENT) as robot:
-            assert robot.name == robot.config.robot_type == "unitree_g1_23dof_amazing_hand_d455_pan_tilt"
+            assert (
+                robot.name == robot.config.robot_type == "unitree_g1-23dof_rev_1_0-amazing_hand-pan_tilt-d455"
+            )
             assert robot.headhand is not None
             assert robot.dex_hand is None
 
@@ -304,4 +326,4 @@ class TestMakeRobotFromConfig:
             cfg = _ah_config(calibration_dir=tmp_path, id="test")
             robot = make_robot_from_config(cfg)
             assert type(robot).__name__ == "UnitreeG1"
-            assert robot.name == "unitree_g1_23dof_amazing_hand_d455_pan_tilt"
+            assert robot.name == "unitree_g1-23dof_rev_1_0-amazing_hand-pan_tilt-d455"
