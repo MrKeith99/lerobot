@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config_unitree_g1_ah_keyboard import UnitreeG1AhKeyboardTeleopConfig
-from .unitree_g1_ah_keyboard import UnitreeG1AhKeyboardTeleop
+from .config_unitree_g1_keyboard import UnitreeG1KeyboardTeleopConfig
+from .unitree_g1_keyboard import UnitreeG1KeyboardTeleop
 
-__all__ = ["UnitreeG1AhKeyboardTeleop", "UnitreeG1AhKeyboardTeleopConfig"]
+__all__ = ["UnitreeG1KeyboardTeleop", "UnitreeG1KeyboardTeleopConfig"]

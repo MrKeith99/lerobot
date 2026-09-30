@@ -14,10 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Keyboard input reader for `UnitreeG1AhKeyboardTeleop`.
+"""Keyboard input reader for `UnitreeG1KeyboardTeleop`.
 
-Mirrors the duck-typed interface `UnitreeG1AhGamepadInput` exposes to
-`UnitreeG1AhGamepadTeleop` (`start`, `stop`, `update`, `axis`, `button`, `hat`,
+Mirrors the duck-typed interface `UnitreeG1GamepadInput` exposes to
+`UnitreeG1GamepadTeleop` (`start`, `stop`, `update`, `axis`, `button`, `hat`,
 `should_intervene`, `get_episode_end_status`, `is_running`) so the teleop's
 target-state stepping logic (`_step_head`, `_step_hands`, `_remote_axes`) works
 unmodified against a `pynput.keyboard.Listener` instead of a joystick.
@@ -25,7 +25,7 @@ unmodified against a `pynput.keyboard.Listener` instead of a joystick.
 Key mapping:
     Arrow keys: head pan/tilt, read through `hat()` -> (x, y). Left = pan left
         (x=-1, matching a gamepad D-pad's `Left arrow turns the head left`
-        convention from `UnitreeG1AhGamepadTeleop._step_head`), Right = pan right
+        convention from `UnitreeG1GamepadTeleop._step_head`), Right = pan right
         (x=+1), Up = tilt up (y=+1), Down = tilt down (y=-1).
     q / e: held -> left / right hand closed, read through `button()` at the
         config layout's `button_lb` / `button_rb` indices (regardless of preset).
@@ -52,7 +52,7 @@ from lerobot.utils.import_utils import _pygame_available, _pynput_available
 from lerobot.utils.keyboard_input import pynput_can_capture
 
 from ..utils import TeleopEvents
-from .config_unitree_g1_ah_keyboard import UnitreeG1AhKeyboardTeleopConfig
+from .config_unitree_g1_keyboard import UnitreeG1KeyboardTeleopConfig
 
 pynput_keyboard = None
 if TYPE_CHECKING or _pynput_available:
@@ -67,7 +67,7 @@ else:
     pygame = None  # type: ignore[assignment]
 
 _WINDOW_HELP = (
-    "UnitreeG1Ah keyboard teleop - keep this window focused",
+    "Unitree G1 keyboard teleop - keep this window focused",
     "arrows: head pan/tilt      q / e: close left / right hand",
     "w a s d: left stick         i j k l: right stick",
     "y / n / r: success / failure / rerecord   space: intervene",
@@ -88,7 +88,7 @@ _EPISODE_KEYS: dict[str, TeleopEvents] = {
 }
 
 
-_ACTIVE_INPUTS: set[UnitreeG1AhKeyboardInput] = set()
+_ACTIVE_INPUTS: set[UnitreeG1KeyboardInput] = set()
 _ACTIVE_LOCK = threading.Lock()
 
 
@@ -105,14 +105,14 @@ def external_key_event(name: str, hold_s: float = 0.35) -> None:
         kb.tap(name, hold_s)
 
 
-class UnitreeG1AhKeyboardInput:
-    """Keyboard input exposing the same interface as `UnitreeG1AhGamepadInput`.
+class UnitreeG1KeyboardInput:
+    """Keyboard input exposing the same interface as `UnitreeG1GamepadInput`.
 
     Keys come from `pynput` when it can capture (X11) and/or from `external_key_event`
     (in-process sources such as the simulator's viewer window).
     """
 
-    def __init__(self, config: UnitreeG1AhKeyboardTeleopConfig):
+    def __init__(self, config: UnitreeG1KeyboardTeleopConfig):
         self.config = config
         self._pressed: set[str] = set()
         self._tap_expiry: dict[str, float] = {}
@@ -164,7 +164,7 @@ class UnitreeG1AhKeyboardInput:
             return
         pygame.init()
         self._window = pygame.display.set_mode(self.config.window_size)
-        pygame.display.set_caption("UnitreeG1Ah teleop keys")
+        pygame.display.set_caption("Unitree G1 teleop keys")
         self._font = pygame.font.SysFont(None, 22)
         self._draw_window()
 

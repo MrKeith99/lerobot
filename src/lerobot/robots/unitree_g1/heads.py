@@ -14,11 +14,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""UnitreeG1Ah robot package: Unitree G1 23dof body + Dynamixel pan/tilt head + AmazingHand hands."""
+"""Head variants for the Unitree G1: the stock fixed head, or a 2-DoF Dynamixel pan/tilt D455 mount.
+
+Pure stdlib: no hardware/SDK/bus imports here.
+"""
 
 from __future__ import annotations
 
-from .config_unitree_g1_ah import UnitreeG1AhConfig
-from .unitree_g1_ah import UnitreeG1Ah
+HEADS: tuple[str, ...] = ("none", "d455_pan_tilt")
 
-__all__ = ["UnitreeG1Ah", "UnitreeG1AhConfig"]
+# d455_pan_tilt: two Dynamixel XL330-M288 servos, driven through the head/hand ZMQ bridge.
+HEAD_MOTORS: dict[str, tuple[int, str]] = {
+    "kHeadYaw": (1, "xl330-m288"),
+    "kHeadPitch": (2, "xl330-m288"),
+}
+HEAD_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in HEAD_MOTORS)
+HEAD_LIMITS_RAD: dict[str, tuple[float, float]] = {
+    "kHeadYaw": (-0.7, 0.7),
+    "kHeadPitch": (-1.57, 0.8),
+}
+DEFAULT_HEAD_Q: tuple[float, float] = (0.0, 0.0)

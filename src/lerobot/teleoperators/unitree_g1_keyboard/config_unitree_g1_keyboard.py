@@ -19,19 +19,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..config import TeleoperatorConfig
-from ..unitree_g1_ah_gamepad.config_unitree_g1_ah_gamepad import UnitreeG1AhGamepadTeleopConfig
+from ..unitree_g1_gamepad.config_unitree_g1_gamepad import UnitreeG1GamepadTeleopConfig
 
 
-@TeleoperatorConfig.register_subclass("unitree_g1_ah_keyboard")
+@TeleoperatorConfig.register_subclass("unitree_g1_keyboard")
 @dataclass
-class UnitreeG1AhKeyboardTeleopConfig(UnitreeG1AhGamepadTeleopConfig):
-    """Hardware-light keyboard teleoperator for the UnitreeG1Ah robot.
+class UnitreeG1KeyboardTeleopConfig(UnitreeG1GamepadTeleopConfig):
+    """Hardware-light keyboard teleoperator for the Unitree G1.
 
-    Reuses `UnitreeG1AhGamepadTeleop`'s target-state stepping logic (head, hand blend,
+    Reuses `UnitreeG1GamepadTeleop`'s target-state stepping logic (head, hand blend,
     remote axes) against a `pynput`-backed keyboard input instead of a joystick. Emits
     every key in `TELEOP_ACTION_KEYS`, same as the gamepad teleop.
 
-    `layout` and `preset` are inherited from `UnitreeG1AhGamepadTeleopConfig` but unused
+    `layout` and `preset` are inherited from `UnitreeG1GamepadTeleopConfig` but unused
     here: the keyboard input has a fixed key mapping (arrows/WASD/IJKL/QE), not indices.
 
     `remote_axis_value` is the stick magnitude emitted (via `axis()`) while a

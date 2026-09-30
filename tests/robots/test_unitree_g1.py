@@ -17,6 +17,7 @@
 """Tests for Unitree G1 robot. Meant to be run in an environment where the Unitree SDK is installed."""
 
 import contextlib
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -123,7 +124,7 @@ class TestUnitreeG1Config:
         assert cfg2.kp[0] != 999.0
 
     def test_default_sim_env_repo_id(self):
-        assert UnitreeG1Config().sim_env_repo_id == "lerobot/unitree-g1-mujoco"
+        assert UnitreeG1Config().sim_env_repo_id == "k-valentin/unitree-g1-mujoco"
 
 
 # ---------------------------------------------------------------------------
@@ -321,11 +322,19 @@ def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
     fake_inner_env.simulator = None  # no elastic band / bridge joystick to poll
     fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
 
-    with patch("lerobot.envs.make_env", return_value=fake_env_wrapper) as mock_make_env:
+    embodiment_vars = ("UNITREE_G1_MUJOCO_BODY", "UNITREE_G1_MUJOCO_END_EFFECTOR", "UNITREE_G1_MUJOCO_HEAD")
+    seen_env = {}
+
+    def fake_make_env(*args, **kwargs):
+        seen_env.update({key: os.environ.get(key) for key in embodiment_vars})
+        return fake_env_wrapper
+
+    with patch("lerobot.envs.make_env", side_effect=fake_make_env) as mock_make_env:
         robot.connect()
         mock_make_env.assert_called_once_with(robot.config.sim_env_repo_id, trust_remote_code=True)
-        assert robot.config.sim_env_repo_id == "lerobot/unitree-g1-mujoco"
         assert robot.sim_env is fake_inner_env
+    # The sim gets the embodiment through its environment variables
+    assert seen_env == dict(zip(embodiment_vars, ("29dof", "none", "none"), strict=True))
 
 
 def _attach_fake_sim(robot, pressed: set[int], band_enabled: bool = False, num_buttons: int = 13):

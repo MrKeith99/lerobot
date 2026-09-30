@@ -14,35 +14,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hardware-light keyboard teleoperator for the UnitreeG1Ah robot.
+"""Hardware-light keyboard teleoperator for the Unitree G1.
 
-Subclasses `UnitreeG1AhGamepadTeleop`, reusing its target-state stepping logic
+Subclasses `UnitreeG1GamepadTeleop`, reusing its target-state stepping logic
 (`_step_head`, `_step_hands`, `_remote_axes`, `get_action`, `get_teleop_events`)
-unmodified. Only `connect()` is overridden, to create a `UnitreeG1AhKeyboardInput`
-instead of a `UnitreeG1AhGamepadInput`.
+unmodified. Only `connect()` is overridden, to create a `UnitreeG1KeyboardInput`
+instead of a `UnitreeG1GamepadInput`.
 """
 
 from __future__ import annotations
 
-from ..unitree_g1_ah_gamepad.unitree_g1_ah_gamepad import UnitreeG1AhGamepadTeleop
-from .config_unitree_g1_ah_keyboard import UnitreeG1AhKeyboardTeleopConfig
-from .keyboard_input import UnitreeG1AhKeyboardInput
+from ..unitree_g1_gamepad.unitree_g1_gamepad import UnitreeG1GamepadTeleop
+from .config_unitree_g1_keyboard import UnitreeG1KeyboardTeleopConfig
+from .keyboard_input import UnitreeG1KeyboardInput
 
 
-class UnitreeG1AhKeyboardTeleop(UnitreeG1AhGamepadTeleop):
-    """Keyboard teleoperator emitting the full UnitreeG1Ah teleop action space (73 keys).
+class UnitreeG1KeyboardTeleop(UnitreeG1GamepadTeleop):
+    """Keyboard teleoperator emitting the full Unitree G1 teleop action space (`TELEOP_ACTION_KEYS`).
 
     The 16 `REMOTE_BUTTONS` are always zero here: no keys are bound to the waist triggers.
     """
 
-    config_class = UnitreeG1AhKeyboardTeleopConfig
-    name = "unitree_g1_ah_keyboard"
+    config_class = UnitreeG1KeyboardTeleopConfig
+    name = "unitree_g1_keyboard"
 
     def connect(self, calibrate: bool = True) -> None:
-        self.gamepad = UnitreeG1AhKeyboardInput(self.config)
+        self.gamepad = UnitreeG1KeyboardInput(self.config)
         self.gamepad.start()
         self._last_t = None
-        print("UnitreeG1Ah keyboard controls:")
+        print("Unitree G1 keyboard controls:")
         print("  Arrow keys: head pan (left/right) / tilt (up/down)")
         print("  q / e: hold to close left / right hand")
         print("  w/s, a/d: forward / sideways (kNavVx / kNavVy, left stick)")

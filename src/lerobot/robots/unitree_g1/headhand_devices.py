@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Head (Dynamixel) + hands (Feetech) motor bus wrapper for the UnitreeG1Ah robot.
+"""Pan/tilt head (Dynamixel) + AmazingHand (Feetech) motor bus wrapper for the Unitree G1.
 
 Ticks are always read/written raw (`normalize=False`); conversion to/from radians is
 done here instead of relying on `MotorsBus` normalization, since the SCS0009 servo span
@@ -31,7 +31,8 @@ from collections.abc import Mapping
 
 from lerobot.motors.motors_bus import Motor, MotorCalibration, MotorNormMode
 
-from .g1_ah_joints import HAND_LIMIT_RAD, HAND_MOTORS, HEAD_LIMITS_RAD, HEAD_MOTORS
+from .end_effectors import AMAZING_HAND_LIMIT_RAD, AMAZING_HAND_MOTORS as HAND_MOTORS
+from .heads import HEAD_LIMITS_RAD, HEAD_MOTORS
 
 TICKS_PER_RAD: dict[str, float] = {
     "xl330-m288": 4096 / (2 * math.pi),
@@ -44,6 +45,9 @@ TICK_RANGE: dict[str, tuple[int, int]] = {
 
 DEFAULT_HEAD_PORT = "/dev/ttyCH341USB0"
 DEFAULT_HAND_PORT = "/dev/ttyACM0"
+
+# Every motor behind the head/hand bridge, by name: (ID, model).
+HEAD_HAND_MOTORS: dict[str, tuple[int, str]] = {**HEAD_MOTORS, **HAND_MOTORS}
 
 
 def ticks_to_rad(model: str, ticks: int, calib: MotorCalibration) -> float:
@@ -67,7 +71,7 @@ def clamp_rad(name: str, rad: float) -> float:
         low, high = HEAD_LIMITS_RAD[name]
         return min(high, max(low, rad))
     if name in HAND_MOTORS:
-        return min(HAND_LIMIT_RAD, max(-HAND_LIMIT_RAD, rad))
+        return min(AMAZING_HAND_LIMIT_RAD, max(-AMAZING_HAND_LIMIT_RAD, rad))
     raise ValueError(f"Unknown motor name: {name!r}")
 
 
@@ -105,7 +109,7 @@ def build_hand_motors() -> dict[str, Motor]:
 
 
 class HeadHandDevice:
-    """Owns the Dynamixel head bus and the Feetech hand bus for the UnitreeG1Ah robot."""
+    """Owns the Dynamixel head bus and the Feetech AmazingHand bus."""
 
     def __init__(
         self,
@@ -126,9 +130,7 @@ class HeadHandDevice:
 
         self.head_bus = head_bus_cls(port=head_port, motors=build_head_motors())
         self.hand_bus = hand_bus_cls(port=hand_port, motors=build_hand_motors(), protocol_version=1)
-        self.models: dict[str, str] = {
-            name: model for name, (_, model) in {**HEAD_MOTORS, **HAND_MOTORS}.items()
-        }
+        self.models: dict[str, str] = {name: model for name, (_, model) in HEAD_HAND_MOTORS.items()}
         self._lock = threading.Lock()
 
     def connect(self, handshake: bool = True) -> None:
@@ -207,7 +209,7 @@ class HeadHandDevice:
 
 
 def _cli() -> None:
-    parser = argparse.ArgumentParser(description="UnitreeG1Ah head/hand device utility")
+    parser = argparse.ArgumentParser(description="Unitree G1 head/hand device utility")
     parser.add_argument("command", choices=["scan", "read", "torque-off"])
     parser.add_argument("--head-port", default=DEFAULT_HEAD_PORT)
     parser.add_argument("--hand-port", default=DEFAULT_HAND_PORT)

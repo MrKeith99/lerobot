@@ -131,7 +131,6 @@ from lerobot.robots import (  # noqa: F401
     rebot_b601_follower,
     so_follower,
     unitree_g1 as unitree_g1_robot,
-    unitree_g1_ah,
 )
 from lerobot.robots.unitree_g1 import UnitreeG1
 from lerobot.teleoperators import (  # noqa: F401
@@ -151,8 +150,8 @@ from lerobot.teleoperators import (  # noqa: F401
     rebot_102_leader,
     so_leader,
     unitree_g1,
-    unitree_g1_ah_gamepad,
-    unitree_g1_ah_keyboard,
+    unitree_g1_gamepad,
+    unitree_g1_keyboard,
 )
 from lerobot.teleoperators.keyboard import KeyboardTeleop
 from lerobot.utils.constants import ACTION, OBS_STR

@@ -16,11 +16,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import threading
 import time
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
@@ -31,16 +35,23 @@ from lerobot.utils.import_utils import _unitree_sdk_available, require_package
 
 from ..robot import Robot
 from .config_unitree_g1 import UnitreeG1Config
+from .dex_hands import DexHandDriver
+from .end_effectors import HAND_CLOSURE_KEYS, HAND_SIDES, HAND_SPECS, hand_closure_key
 from .g1_kinematics import G1_29_ArmIK
 from .g1_utils import (
     BASE_HEIGHT_KEY,
+    MODE_MACHINE_BY_REVISION,
     NAV_KEYS,
     REMOTE_KEYS,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
     default_remote_input,
+    invalid_body_keys,
+    invalid_sdk_slots,
     make_locomotion_controller,
 )
+from .headhand import LEGACY_MOTOR_NAMES, HeadHandBridge
+from .heads import HEAD_KEYS
 
 if TYPE_CHECKING or _unitree_sdk_available:
     from unitree_sdk2py.core.channel import (
@@ -107,12 +118,36 @@ class G1_29_LowState:  # noqa: N801
     mode_machine: int = 0  # Robot mode
 
 
+@contextlib.contextmanager
+def _env_vars(values: Mapping[str, str]) -> Iterator[None]:
+    """Temporarily set environment variables."""
+    previous = {key: os.environ.get(key) for key in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 class UnitreeG1(Robot):
+    """Unitree G1 with a configurable embodiment: 29dof/23dof body, optional Dex1/Dex3/AmazingHand end
+    effector and optional pan/tilt head (see `UnitreeG1Config`).
+
+    The body is commanded over DDS lowcmd (or its ZMQ stand-in on hardware), Dex1/Dex3 over their own
+    DDS topics, and the pan/tilt head and AmazingHand servos over the head/hand ZMQ bridge.
+    """
+
     config_class = UnitreeG1Config
     name = "unitree_g1"
 
     def __init__(self, config: UnitreeG1Config):
         require_package("unitree-sdk2py", extra="unitree_g1", import_name="unitree_sdk2py")
+        # Per-embodiment name: the dataset robot_type and the calibration file id.
+        self.name = config.robot_type
         super().__init__(config)
 
         logger.info("Initialize UnitreeG1...")
@@ -138,6 +173,29 @@ class UnitreeG1(Robot):
             self._ChannelFactoryInitialize = ChannelFactoryInitialize
             self._ChannelPublisher = ChannelPublisher
             self._ChannelSubscriber = ChannelSubscriber
+
+        # Embodiment: body slots without a motor, end effector and head/hand bridge
+        self._invalid_slots = frozenset(invalid_sdk_slots(config.body))
+        self._invalid_body_keys = invalid_body_keys(config.body)
+        self.hand_spec = HAND_SPECS.get(config.end_effector)
+        self.dex_hand = (
+            DexHandDriver(
+                self.hand_spec, config.is_simulation, self._ChannelPublisher, self._ChannelSubscriber
+            )
+            if config.end_effector in ("dex1", "dex3")
+            else None
+        )
+        self.headhand = None
+        if config.headhand_motors:
+            headhand_ip = config.headhand_ip or ("127.0.0.1" if config.is_simulation else config.robot_ip)
+            self.headhand = HeadHandBridge(
+                config.headhand_motors,
+                headhand_ip,
+                config.headhand_state_port,
+                config.headhand_cmd_port,
+                timeout_s=config.headhand_timeout_s,
+                stale_warn_s=config.headhand_stale_warn_s,
+            )
 
         # Initialize state variables
         self.sim_env = None
@@ -268,7 +326,8 @@ class UnitreeG1(Robot):
         with self._lowcmd_lock:
             for motor in G1_29_JointIndex:
                 key = f"{motor.name}.q"
-                if key in action:
+                # Slots the body has no motor for keep the zero gains set on connect.
+                if key in action and motor.value not in self._invalid_slots:
                     self.msg.motor_cmd[motor.value].q = action[key]
                     self.msg.motor_cmd[motor.value].qd = 0
                     self.msg.motor_cmd[motor.value].kp = (
@@ -297,17 +356,34 @@ class UnitreeG1(Robot):
     def _arm_ft(self) -> dict[str, type]:
         return {f"{G1_29_JointArmIndex(motor).name}.q": float for motor in G1_29_JointArmIndex}
 
+    @property
+    def _hand_closure(self) -> bool:
+        return self.hand_spec is not None and self.config.hand_representation == "closure"
+
+    @property
+    def _head_hand_ft(self) -> dict[str, type]:
+        """Head joints, then the hand closures or joints."""
+        keys = HEAD_KEYS if self.config.head != "none" else ()
+        if self.hand_spec is not None:
+            keys += HAND_CLOSURE_KEYS if self._hand_closure else self.hand_spec.joint_keys()
+        return dict.fromkeys(keys, float)
+
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
         # With a locomotion controller the policy never commands legs/waist, so they are not recorded.
         motors = self._motors_ft if self.controller is None else self._arm_ft
-        return {**motors, **self._cameras_ft}
+        return {**motors, **self._head_hand_ft, **self._cameras_ft}
 
     @cached_property
     def action_features(self) -> dict[str, type]:
         if self.controller is None:
-            return {f"{G1_29_JointIndex(motor).name}.q": float for motor in G1_29_JointIndex}
-        return {**self._arm_ft, **dict.fromkeys(NAV_KEYS, float), **self._base_height_features}
+            return {**self._motors_ft, **self._head_hand_ft}
+        return {
+            **self._arm_ft,
+            **self._head_hand_ft,
+            **dict.fromkeys(NAV_KEYS, float),
+            **self._base_height_features,
+        }
 
     @property
     def _base_height_enabled(self) -> bool:
@@ -377,12 +453,57 @@ class UnitreeG1(Robot):
             sleep_time = max(0, control_dt - elapsed)
             time.sleep(sleep_time)
 
+    def _load_calibration(self, fpath: Path | None = None) -> None:
+        super()._load_calibration(fpath)
+        legacy = [name for name in self.calibration if name in LEGACY_MOTOR_NAMES]
+        if legacy:
+            self.calibration = {
+                LEGACY_MOTOR_NAMES.get(name, name): calib for name, calib in self.calibration.items()
+            }
+            self._save_calibration(fpath)
+            logger.info(f"Renamed {len(legacy)} legacy head/hand motor names in the calibration file")
+
     def calibrate(self) -> None:
-        # TODO: implement g1_29 calibration
-        pass
+        # Only the head/hand bridge motors need calibrating; the body and Dex hands report joint angles.
+        if self.headhand is None:
+            return
+        print(f"\nCalibrating head/hand motors for {self}")
+        self.calibration = self.headhand.calibrate()
+        self._save_calibration()
 
     def configure(self) -> None:
         pass
+
+    def _check_mode_machine(self, mode_machine: int) -> None:
+        """23dof only: the robot's mode_machine must match `revision`."""
+        if self.config.body != "23dof" or not self.config.check_mode_machine:
+            return
+        expected = MODE_MACHINE_BY_REVISION[self.config.revision]
+        if mode_machine != expected:
+            self.disconnect()
+            raise ValueError(
+                f"mode_machine={mode_machine} does not match revision {self.config.revision!r} "
+                f"(expected {expected}); pass --robot.revision=<base|rev_1_0>"
+            )
+
+    def _connect_head_hand(self, calibrate: bool) -> None:
+        try:
+            if self.dex_hand is not None:
+                self.dex_hand.connect()
+            if self.headhand is not None:
+                self.headhand.connect()
+        except TimeoutError:
+            self.disconnect()
+            raise
+        if self.headhand is None:
+            return
+        if calibrate and not self.is_calibrated:
+            if self.config.is_simulation:
+                logger.info("Simulation mode: writing default head/hand calibration.")
+                self.calibration = self.headhand.default_calibration()
+                self._save_calibration()
+            else:
+                self.calibrate()
 
     def connect(self, calibrate: bool = True) -> None:  # connect to DDS
         # Initialize DDS channel and simulation environment
@@ -390,7 +511,14 @@ class UnitreeG1(Robot):
             from lerobot.envs import make_env
 
             self._ChannelFactoryInitialize(0, "lo")
-            self._env_wrapper = make_env(self.config.sim_env_repo_id, trust_remote_code=True)
+            # The hub env reads the embodiment from these variables (make_env takes no env kwargs).
+            embodiment = {
+                "UNITREE_G1_MUJOCO_BODY": self.config.body,
+                "UNITREE_G1_MUJOCO_END_EFFECTOR": self.config.end_effector,
+                "UNITREE_G1_MUJOCO_HEAD": self.config.head,
+            }
+            with _env_vars(embodiment):
+                self._env_wrapper = make_env(self.config.sim_env_repo_id, trust_remote_code=True)
             # Extract the actual gym env from the dict structure
             self.sim_env = self._env_wrapper["hub_env"][0].envs[0]
         else:
@@ -430,6 +558,7 @@ class UnitreeG1(Robot):
                 logger.warning("[UnitreeG1] Waiting for robot state...")
                 time.sleep(0.01)
         logger.info("[UnitreeG1] Connected to robot.")
+        self._check_mode_machine(lowstate.mode_machine)
         self.msg.mode_machine = lowstate.mode_machine
 
         self.kp = np.array(self.config.kp, dtype=np.float32)
@@ -440,6 +569,8 @@ class UnitreeG1(Robot):
             self.msg.motor_cmd[joint].kp = self.kp[joint.value]
             self.msg.motor_cmd[joint].kd = self.kd[joint.value]
             self.msg.motor_cmd[joint].q = lowstate.motor_state[joint.value].q
+
+        self._connect_head_hand(calibrate)
 
         # Start controller thread if enabled
         if self.controller is not None:
@@ -463,6 +594,13 @@ class UnitreeG1(Robot):
             logger.warning(f"Failed to send zero-torque on disconnect: {e}")
 
     def disconnect(self):
+        if self.headhand is not None:
+            self.headhand.disconnect()
+        if self.dex_hand is not None:
+            self.dex_hand.disconnect()
+        if self._shutdown_event.is_set():  # already disconnected
+            return
+
         # Put robot in passive mode before stopping threads
         if not self.config.is_simulation:
             self._send_zero_torque()
@@ -506,6 +644,9 @@ class UnitreeG1(Robot):
         # Disconnect cameras
         for cam in self._cameras.values():
             cam.disconnect()
+
+        with self._lowstate_lock:
+            self._lowstate = None
 
     def get_observation(self) -> RobotObservation:
         with self._lowstate_lock:
@@ -559,9 +700,59 @@ class UnitreeG1(Robot):
             if getattr(cam, "use_depth", False):
                 obs[f"{cam_name}_depth"] = cam.read_latest_depth()
 
+        # Slots the body has no motor for are recorded as 0.0
+        for key in self._invalid_body_keys:
+            obs[key] = 0.0
+
+        # Head and hand joints, then the hand closures
+        if self.headhand is not None:
+            obs.update(self.headhand.read(self.calibration))
+        if self.dex_hand is not None:
+            obs.update(self.dex_hand.read())
+        if self._hand_closure:
+            for side in HAND_SIDES:
+                keys = self.hand_spec.joint_keys(side)
+                if all(key in obs for key in keys):
+                    obs[hand_closure_key(side)] = self.hand_spec.q_to_closure(
+                        side, [obs[key] for key in keys]
+                    )
+
         return obs
 
     def send_action(self, action: RobotAction) -> RobotAction:
+        """Command the body, head and hand from one action. Hand closures are expanded to joint targets;
+        returns the action with the head/hand targets as sent (clamped)."""
+        action = dict(action)
+        sent: dict[str, float] = {}
+
+        hand_targets: dict[str, float] = {}
+        if self.hand_spec is not None:
+            for side in HAND_SIDES:
+                key = hand_closure_key(side)
+                if self._hand_closure and key in action:
+                    closure = min(max(float(action.pop(key)), 0.0), 1.0)
+                    sent[key] = closure
+                    action.update(
+                        zip(
+                            self.hand_spec.joint_keys(side),
+                            self.hand_spec.closure_to_q(side, closure),
+                            strict=True,
+                        )
+                    )
+            hand_targets = {key: action.pop(key) for key in self.hand_spec.joint_keys() if key in action}
+        head_targets = {key: action.pop(key) for key in HEAD_KEYS if key in action}
+
+        body_sent = self._send_body_action(action)
+
+        if self.headhand is not None:
+            bridge_targets = {**head_targets, **(hand_targets if self.dex_hand is None else {})}
+            sent.update(self.headhand.write(bridge_targets, self.calibration))
+        if self.dex_hand is not None and hand_targets:
+            self.dex_hand.write(hand_targets)
+            sent.update(hand_targets)
+        return {**body_sent, **sent}
+
+    def _send_body_action(self, action: RobotAction) -> RobotAction:
         action_to_publish = action
         if self.controller is not None:
             # Controller thread owns legs/waist. Here we only update joystick inputs
@@ -607,7 +798,7 @@ class UnitreeG1(Robot):
 
     @property
     def is_calibrated(self) -> bool:
-        return True
+        return self.headhand is None or self.headhand.is_calibrated(self.calibration)
 
     @property
     def is_connected(self) -> bool:
@@ -672,4 +863,24 @@ class UnitreeG1(Robot):
         if self.controller is not None and hasattr(self.controller, "reset"):
             self.controller.reset()
 
+        self._reset_head_hand(control_dt)
+
         logger.info("Reached default position")
+
+    def _reset_head_hand(self, control_dt: float, total_time: float = 2.0) -> None:
+        """Ramp the head and hand joints to their default positions."""
+        keys = list(HEAD_KEYS) if self.config.head != "none" else []
+        keys += list(self.hand_spec.joint_keys()) if self.hand_spec is not None else []
+        if not keys:
+            return
+        targets = [*self.config.head_default_positions, *self.config.hand_default_positions]
+        obs = self.get_observation()
+        start = [obs.get(key, target) for key, target in zip(keys, targets, strict=True)]
+        num_steps = max(1, int(total_time / control_dt))
+        for step in range(num_steps):
+            step_start = time.time()
+            alpha = step / num_steps
+            self.send_action(
+                {key: s * (1 - alpha) + t * alpha for key, s, t in zip(keys, start, targets, strict=True)}
+            )
+            time.sleep(max(0, control_dt - (time.time() - step_start)))

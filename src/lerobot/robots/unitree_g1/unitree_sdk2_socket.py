@@ -16,6 +16,8 @@
 
 import base64
 import json
+import threading
+from collections.abc import Callable
 from typing import Any
 
 import zmq
@@ -25,8 +27,7 @@ from .config_unitree_g1 import UnitreeG1Config
 # Module-level ZMQ state mirrors the Unitree SDK's global ChannelFactory Singleton.
 # Only one robot connection per process is supported.
 _ctx: zmq.Context | None = None
-_lowcmd_sock: zmq.Socket | None = None
-_lowstate_sock: zmq.Socket | None = None
+_robot_ip: str | None = None
 
 LOWCMD_PORT = 6000
 LOWSTATE_PORT = 6001
@@ -34,6 +35,29 @@ LOWSTATE_PORT = 6001
 # DDS topic names follow Unitree SDK naming conventions
 # ruff: noqa: N816
 kTopicLowCommand_Debug = "rt/lowcmd"
+kTopicLowState = "rt/lowstate"
+
+# One ZMQ port per bridged DDS topic (6002/6003 are the head/hand bridge). Commands are PUSH/PULL,
+# states PUB/SUB, both conflated to the latest message, so each topic needs its own socket.
+TOPIC_PORTS: dict[str, int] = {
+    kTopicLowCommand_Debug: LOWCMD_PORT,
+    kTopicLowState: LOWSTATE_PORT,
+    "rt/dex3/left/cmd": 6010,
+    "rt/dex3/right/cmd": 6011,
+    "rt/dex3/left/state": 6012,
+    "rt/dex3/right/state": 6013,
+    "rt/dex1/left/cmd": 6014,
+    "rt/dex1/right/cmd": 6015,
+    "rt/dex1/left/state": 6016,
+    "rt/dex1/right/state": 6017,
+}
+
+
+def topic_port(topic: str) -> int:
+    """ZMQ port of a bridged DDS topic."""
+    if topic not in TOPIC_PORTS:
+        raise ValueError(f"Topic {topic!r} is not bridged; bridged topics: {list(TOPIC_PORTS)}")
+    return TOPIC_PORTS[topic]
 
 
 class LowStateMsg:
@@ -73,35 +97,39 @@ class LowStateMsg:
         self.mode_machine: int = data.get("mode_machine", 0)
 
 
-def lowcmd_to_dict(topic: str, msg: Any) -> dict[str, Any]:
-    """Convert LowCmd message to a JSON-serializable dictionary."""
-    motor_cmds = []
-    # Iterate over all motor commands in the message
-    for i in range(len(msg.motor_cmd)):
-        motor_cmds.append(
-            {
-                "mode": int(msg.motor_cmd[i].mode),
-                "q": float(msg.motor_cmd[i].q),
-                "dq": float(msg.motor_cmd[i].dq),
-                "kp": float(msg.motor_cmd[i].kp),
-                "kd": float(msg.motor_cmd[i].kd),
-                "tau": float(msg.motor_cmd[i].tau),
-            }
-        )
+class MotorStatesMsg:
+    """Mimics a hand state message: `HandState_.motor_state` (Dex3) or `MotorStates_.states` (Dex1)."""
 
-    return {
-        "topic": topic,
-        "data": {
-            "mode_pr": int(msg.mode_pr),
-            "mode_machine": int(msg.mode_machine),
-            "motor_cmd": motor_cmds,
-        },
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.motor_state = [LowStateMsg.MotorState(m) for m in data.get("motor_state", [])]
+        self.states = self.motor_state
+
+
+def lowcmd_to_dict(topic: str, msg: Any) -> dict[str, Any]:
+    """Convert a motor command message (LowCmd_, HandCmd_ or MotorCmds_) to a JSON-serializable dictionary."""
+    motors = msg.motor_cmd if hasattr(msg, "motor_cmd") else msg.cmds
+    data: dict[str, Any] = {
+        "motor_cmd": [
+            {
+                "mode": int(m.mode),
+                "q": float(m.q),
+                "dq": float(m.dq),
+                "kp": float(m.kp),
+                "kd": float(m.kd),
+                "tau": float(m.tau),
+            }
+            for m in motors
+        ]
     }
+    if hasattr(msg, "mode_pr"):
+        data["mode_pr"] = int(msg.mode_pr)
+        data["mode_machine"] = int(msg.mode_machine)
+    return {"topic": topic, "data": data}
 
 
 def ChannelFactoryInitialize(domain_id: int = 0, config: Any = None) -> None:  # noqa: N802
     """
-    Initialize ZMQ sockets for robot communication.
+    Initialize ZMQ communication with the robot server bridge.
 
     This function mimics the Unitree SDK's ChannelFactoryInitialize but uses
     ZMQ sockets to connect to the robot server bridge instead of DDS.
@@ -110,28 +138,22 @@ def ChannelFactoryInitialize(domain_id: int = 0, config: Any = None) -> None:  #
         domain_id: Ignored (for API compatibility with Unitree SDK)
         config: UnitreeG1Config instance with robot_ip
     """
-    global _ctx, _lowcmd_sock, _lowstate_sock
+    global _ctx, _robot_ip
 
     # read socket config
     if config is None:
         config = UnitreeG1Config()
-    robot_ip = config.robot_ip
+    _robot_ip = config.robot_ip
+    _ctx = zmq.Context.instance()
 
-    ctx = zmq.Context.instance()
-    _ctx = ctx
 
-    # lowcmd: send robot commands
-    lowcmd_sock = ctx.socket(zmq.PUSH)
-    lowcmd_sock.setsockopt(zmq.CONFLATE, 1)  # keep only last message
-    lowcmd_sock.connect(f"tcp://{robot_ip}:{LOWCMD_PORT}")
-    _lowcmd_sock = lowcmd_sock
-
-    # lowstate: receive robot observations
-    lowstate_sock = ctx.socket(zmq.SUB)
-    lowstate_sock.setsockopt(zmq.CONFLATE, 1)  # keep only last message
-    lowstate_sock.connect(f"tcp://{robot_ip}:{LOWSTATE_PORT}")
-    lowstate_sock.setsockopt_string(zmq.SUBSCRIBE, "")
-    _lowstate_sock = lowstate_sock
+def _socket(kind: int, topic: str) -> zmq.Socket:
+    if _ctx is None:
+        raise RuntimeError("ChannelFactoryInitialize must be called first")
+    sock = _ctx.socket(kind)
+    sock.setsockopt(zmq.CONFLATE, 1)  # keep only last message
+    sock.connect(f"tcp://{_robot_ip}:{topic_port(topic)}")
+    return sock
 
 
 class ChannelPublisher:
@@ -140,36 +162,68 @@ class ChannelPublisher:
     def __init__(self, topic: str, msg_type: type) -> None:
         self.topic = topic
         self.msg_type = msg_type
+        self._sock: zmq.Socket | None = None
 
     def Init(self) -> None:  # noqa: N802
-        """Initialize the publisher (no-op for ZMQ)."""
-        pass
+        """Connect the command socket of this topic."""
+        self._sock = _socket(zmq.PUSH, self.topic)
 
     def Write(self, msg: Any) -> None:  # noqa: N802
         """Serialize and send a command message to the robot."""
-        if _lowcmd_sock is None:
-            raise RuntimeError("ChannelFactoryInitialize must be called first")
+        if self._sock is None:
+            raise RuntimeError("Init must be called first")
 
         payload = json.dumps(lowcmd_to_dict(self.topic, msg)).encode("utf-8")
-        _lowcmd_sock.send(payload)
+        self._sock.send(payload)
 
 
 class ChannelSubscriber:
-    """ZMQ-based subscriber that receives state from the robot server."""
+    """ZMQ-based subscriber that receives state from the robot server.
+
+    Like the SDK, it is either read with `Read()` or, when `Init` gets a handler, delivers each
+    message to the handler from a background thread.
+    """
 
     def __init__(self, topic: str, msg_type: type) -> None:
         self.topic = topic
         self.msg_type = msg_type
+        self._sock: zmq.Socket | None = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
 
-    def Init(self) -> None:  # noqa: N802
-        """Initialize the subscriber (no-op for ZMQ)."""
-        pass
+    def Init(self, handler: Callable[[Any], None] | None = None, queueLen: int = 0) -> None:  # noqa: N802, N803
+        """Connect the state socket of this topic, and start delivering to `handler` if given."""
+        self._sock = _socket(zmq.SUB, self.topic)
+        self._sock.setsockopt_string(zmq.SUBSCRIBE, "")
+        if handler is not None:
+            self._sock.setsockopt(zmq.RCVTIMEO, 100)
+            self._thread = threading.Thread(target=self._deliver, args=(handler,), daemon=True)
+            self._thread.start()
 
-    def Read(self) -> LowStateMsg:  # noqa: N802
+    def _decode(self, payload: bytes) -> LowStateMsg | MotorStatesMsg:
+        data = json.loads(payload.decode("utf-8")).get("data", {})
+        return LowStateMsg(data) if self.topic == kTopicLowState else MotorStatesMsg(data)
+
+    def _deliver(self, handler: Callable[[Any], None]) -> None:
+        while not self._stop.is_set():
+            try:
+                payload = self._sock.recv()
+            except zmq.Again:
+                continue
+            except zmq.ZMQError:  # socket closed or context terminated
+                break
+            handler(self._decode(payload))
+
+    def Read(self) -> LowStateMsg | MotorStatesMsg:  # noqa: N802
         """Receive and deserialize a state message from the robot."""
-        if _lowstate_sock is None:
-            raise RuntimeError("ChannelFactoryInitialize must be called first")
+        if self._sock is None:
+            raise RuntimeError("Init must be called first")
+        return self._decode(self._sock.recv())
 
-        payload = _lowstate_sock.recv()
-        msg_dict = json.loads(payload.decode("utf-8"))
-        return LowStateMsg(msg_dict.get("data", {}))
+    def Close(self) -> None:  # noqa: N802
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        if self._sock is not None:
+            self._sock.close(linger=0)
+            self._sock = None

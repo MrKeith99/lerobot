@@ -14,8 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `g1_ah_zmq`: client/server wire format and round trip over real sockets on localhost."""
+"""Tests for `headhand_zmq`: client/server wire format and round trip over real sockets on localhost."""
 
+import json
 import threading
 import time
 from unittest.mock import MagicMock
@@ -24,10 +25,10 @@ import pytest
 
 pytest.importorskip("zmq")
 
-from lerobot.robots.unitree_g1_ah import g1_ah_zmq as gz
-from lerobot.robots.unitree_g1_ah.g1_ah_devices import HeadHandDevice
-from lerobot.robots.unitree_g1_ah.g1_ah_joints import HEAD_HAND_MOTORS, HEAD_MOTORS
-from tests.mocks.mock_unitree_g1_ah_server import MockHeadHandServer
+from lerobot.robots.unitree_g1 import headhand_zmq as gz
+from lerobot.robots.unitree_g1.headhand_devices import HEAD_HAND_MOTORS, HeadHandDevice
+from lerobot.robots.unitree_g1.heads import HEAD_MOTORS
+from tests.mocks.mock_unitree_g1_headhand_server import MockHeadHandServer
 
 
 def _wait_until(predicate, timeout_s: float = 3.0, interval_s: float = 0.01) -> bool:
@@ -66,6 +67,11 @@ def test_encode_decode_cmd_round_trip():
     data = gz.decode_cmd(payload)
     assert data["goal_ticks"] == {"a": 5}
     assert data["torque"] is False
+
+
+def test_wire_topics():
+    assert json.loads(gz.encode_state({}, torque=False))["topic"] == "unitree_g1/headhand_state"
+    assert json.loads(gz.encode_cmd(torque=True))["topic"] == "unitree_g1/headhand_cmd"
 
 
 def test_client_read_latest_receives_all_motor_names(client):

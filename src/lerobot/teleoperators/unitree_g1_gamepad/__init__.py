@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config_unitree_g1_ah_gamepad import UnitreeG1AhGamepadTeleopConfig
-from .unitree_g1_ah_gamepad import UnitreeG1AhGamepadTeleop
+from .config_unitree_g1_gamepad import UnitreeG1GamepadTeleopConfig
+from .unitree_g1_gamepad import UnitreeG1GamepadTeleop
 
-__all__ = ["UnitreeG1AhGamepadTeleop", "UnitreeG1AhGamepadTeleopConfig"]
+__all__ = ["UnitreeG1GamepadTeleop", "UnitreeG1GamepadTeleopConfig"]

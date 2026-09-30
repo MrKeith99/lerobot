@@ -23,29 +23,25 @@ from unittest.mock import patch
 
 import pytest
 
+from lerobot.robots.unitree_g1.end_effectors import AMAZING_HAND, amazing_hand_motor_names
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_KEYS
-from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
-    TELEOP_ACTION_KEYS,
-    default_action,
-    hand_motor_names,
-    hand_pose_rad,
+from lerobot.teleoperators.unitree_g1_gamepad.unitree_g1_gamepad import TELEOP_ACTION_KEYS, default_targets
+from lerobot.teleoperators.unitree_g1_keyboard import (
+    UnitreeG1KeyboardTeleop,
+    UnitreeG1KeyboardTeleopConfig,
 )
-from lerobot.teleoperators.unitree_g1_ah_keyboard import (
-    UnitreeG1AhKeyboardTeleop,
-    UnitreeG1AhKeyboardTeleopConfig,
-)
-from lerobot.teleoperators.unitree_g1_ah_keyboard.keyboard_input import UnitreeG1AhKeyboardInput
+from lerobot.teleoperators.unitree_g1_keyboard.keyboard_input import UnitreeG1KeyboardInput
 from lerobot.teleoperators.utils import TeleopEvents, make_teleoperator_from_config
 from lerobot.utils.errors import DeviceNotConnectedError
 
-_MODULE = "lerobot.teleoperators.unitree_g1_ah_keyboard.unitree_g1_ah_keyboard"
-# get_action/time.perf_counter are inherited unmodified from UnitreeG1AhGamepadTeleop, so
+_MODULE = "lerobot.teleoperators.unitree_g1_keyboard.unitree_g1_keyboard"
+# get_action/time.perf_counter are inherited unmodified from UnitreeG1GamepadTeleop, so
 # `time` must be patched in its defining module, not in the (time-import-less) keyboard one.
-_PARENT_MODULE = "lerobot.teleoperators.unitree_g1_ah_gamepad.unitree_g1_ah_gamepad"
+_PARENT_MODULE = "lerobot.teleoperators.unitree_g1_gamepad.unitree_g1_gamepad"
 
 
-class FakeInput(UnitreeG1AhKeyboardInput):
-    """`UnitreeG1AhKeyboardInput` with `start`/`stop` stubbed out (no real listener)."""
+class FakeInput(UnitreeG1KeyboardInput):
+    """`UnitreeG1KeyboardInput` with `start`/`stop` stubbed out (no real listener)."""
 
     def __init__(self, config):
         super().__init__(config)
@@ -63,18 +59,18 @@ class FakeInput(UnitreeG1AhKeyboardInput):
 def test_keyboard_input_imports_when_pynput_backend_fails():
     code = (
         "import sys; sys.modules['pynput.keyboard'] = None; "
-        "import lerobot.teleoperators.unitree_g1_ah_keyboard.keyboard_input as m; "
+        "import lerobot.teleoperators.unitree_g1_keyboard.keyboard_input as m; "
         "assert m.pynput_keyboard is None"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
 
 
-# ── UnitreeG1AhKeyboardInput unit tests (no pynput, driven via press/release) ──
+# ── UnitreeG1KeyboardInput unit tests (no pynput, driven via press/release) ──
 
 
 @pytest.fixture
 def keyboard_input():
-    return UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig())
+    return UnitreeG1KeyboardInput(UnitreeG1KeyboardTeleopConfig())
 
 
 def test_hat_arrow_mapping(keyboard_input):
@@ -179,10 +175,10 @@ def test_esc_stops_running(keyboard_input):
 
 
 def test_start_without_pynput_logs_warning_and_runs_with_no_keys(caplog):
-    ki = UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig(backend="pynput"))
+    ki = UnitreeG1KeyboardInput(UnitreeG1KeyboardTeleopConfig(backend="pynput"))
     with (
         patch(
-            "lerobot.teleoperators.unitree_g1_ah_keyboard.keyboard_input.pynput_can_capture",
+            "lerobot.teleoperators.unitree_g1_keyboard.keyboard_input.pynput_can_capture",
             return_value=False,
         ),
         caplog.at_level("WARNING"),
@@ -198,8 +194,8 @@ def test_start_without_pynput_logs_warning_and_runs_with_no_keys(caplog):
 
 @pytest.fixture
 def teleop():
-    with patch(f"{_MODULE}.UnitreeG1AhKeyboardInput", FakeInput):
-        t = UnitreeG1AhKeyboardTeleop(UnitreeG1AhKeyboardTeleopConfig())
+    with patch(f"{_MODULE}.UnitreeG1KeyboardInput", FakeInput):
+        t = UnitreeG1KeyboardTeleop(UnitreeG1KeyboardTeleopConfig())
         t.connect()
         yield t
         if t.is_connected:
@@ -208,7 +204,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 73
+    assert len(teleop.action_features) == 89
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -218,7 +214,7 @@ def test_get_action_keys_match_action_features(teleop):
 
 def test_idle_action_matches_default_and_zero_remote(teleop):
     action = teleop.get_action()
-    default = default_action()
+    default = default_targets()
     for key, value in default.items():
         assert action[key] == pytest.approx(value)
     for key in REMOTE_KEYS:
@@ -255,9 +251,9 @@ def test_e_held_closes_right_hand(teleop):
             clock["t"] += dt
             action = teleop.get_action()
 
-        closed_right = hand_pose_rad("right", True)
+        closed_right = AMAZING_HAND.closed_q["right"]
         for name, expected in zip(
-            hand_motor_names("right"),
+            amazing_hand_motor_names("right"),
             closed_right,
             strict=True,
         ):
@@ -265,8 +261,8 @@ def test_e_held_closes_right_hand(teleop):
         assert action["kRightHand.closure"] == pytest.approx(1.0, abs=1e-3)
         assert action["kLeftHand.closure"] == 0.0
 
-        default = default_action()
-        for name in hand_motor_names("left"):
+        default = default_targets()
+        for name in amazing_hand_motor_names("left"):
             key = f"{name}.q"
             assert action[key] == pytest.approx(default[key])
 
@@ -279,8 +275,8 @@ def test_w_gives_positive_remote_ly(teleop):
 
 
 def test_emit_remote_axes_false_zeros_out():
-    with patch(f"{_MODULE}.UnitreeG1AhKeyboardInput", FakeInput):
-        t = UnitreeG1AhKeyboardTeleop(UnitreeG1AhKeyboardTeleopConfig(emit_remote_axes=False))
+    with patch(f"{_MODULE}.UnitreeG1KeyboardInput", FakeInput):
+        t = UnitreeG1KeyboardTeleop(UnitreeG1KeyboardTeleopConfig(emit_remote_axes=False))
         t.connect()
         t.gamepad.press("d")
         action = t.get_action()
@@ -315,7 +311,7 @@ def test_disconnect_idempotent(teleop):
 
 
 def test_get_action_before_connect_raises():
-    teleop = UnitreeG1AhKeyboardTeleop(UnitreeG1AhKeyboardTeleopConfig())
+    teleop = UnitreeG1KeyboardTeleop(UnitreeG1KeyboardTeleopConfig())
     with pytest.raises(DeviceNotConnectedError):
         teleop.get_action()
 
@@ -324,16 +320,16 @@ def test_make_teleoperator_from_config_returns_class_without_importing_pynput():
     import sys
 
     sys.modules.pop("pynput", None)
-    teleop = make_teleoperator_from_config(UnitreeG1AhKeyboardTeleopConfig())
-    assert isinstance(teleop, UnitreeG1AhKeyboardTeleop)
+    teleop = make_teleoperator_from_config(UnitreeG1KeyboardTeleopConfig())
+    assert isinstance(teleop, UnitreeG1KeyboardTeleop)
     assert not teleop.is_connected
     assert "pynput" not in sys.modules
 
 
 def test_external_key_event_taps_then_releases(monkeypatch):
-    from lerobot.teleoperators.unitree_g1_ah_keyboard import keyboard_input as kb
+    from lerobot.teleoperators.unitree_g1_keyboard import keyboard_input as kb
 
-    inp = kb.UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig(backend="external"))
+    inp = kb.UnitreeG1KeyboardInput(UnitreeG1KeyboardTeleopConfig(backend="external"))
     monkeypatch.setattr(kb, "_pynput_available", False)
     inp.start()
     try:
@@ -359,9 +355,9 @@ def test_external_key_event_taps_then_releases(monkeypatch):
 def test_window_backend_pumps_key_events(monkeypatch):
     from types import SimpleNamespace
 
-    from lerobot.teleoperators.unitree_g1_ah_keyboard import keyboard_input as kb
+    from lerobot.teleoperators.unitree_g1_keyboard import keyboard_input as kb
 
-    inp = kb.UnitreeG1AhKeyboardInput(UnitreeG1AhKeyboardTeleopConfig(backend="window"))
+    inp = kb.UnitreeG1KeyboardInput(UnitreeG1KeyboardTeleopConfig(backend="window"))
     batches = [
         [SimpleNamespace(type="down", key=1)],
         [

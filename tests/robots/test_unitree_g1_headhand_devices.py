@@ -14,14 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `g1_ah_devices`: tick/rad conversion and `HeadHandDevice` bus wiring. No hardware."""
+"""Tests for `headhand_devices`: tick/rad conversion and `HeadHandDevice` bus wiring. No hardware."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from lerobot.robots.unitree_g1_ah import g1_ah_devices as d
-from lerobot.robots.unitree_g1_ah.g1_ah_joints import HAND_MOTORS, HEAD_LIMITS_RAD, HEAD_MOTORS
+from lerobot.robots.unitree_g1 import headhand_devices as d
+from lerobot.robots.unitree_g1.end_effectors import AMAZING_HAND_LIMIT_RAD, AMAZING_HAND_MOTORS as HAND_MOTORS
+from lerobot.robots.unitree_g1.heads import HEAD_LIMITS_RAD, HEAD_MOTORS
 
 
 def _bus_factory(motors_seen: dict) -> MagicMock:
@@ -126,8 +127,8 @@ def test_clamp_rad_head_limits():
 
 def test_clamp_rad_hand_limits():
     name = next(iter(HAND_MOTORS))
-    assert d.clamp_rad(name, 100.0) == pytest.approx(d.HAND_LIMIT_RAD)
-    assert d.clamp_rad(name, -100.0) == pytest.approx(-d.HAND_LIMIT_RAD)
+    assert d.clamp_rad(name, 100.0) == pytest.approx(AMAZING_HAND_LIMIT_RAD)
+    assert d.clamp_rad(name, -100.0) == pytest.approx(-AMAZING_HAND_LIMIT_RAD)
 
 
 def test_clamp_rad_unknown_name_raises():

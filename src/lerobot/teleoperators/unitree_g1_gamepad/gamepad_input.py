@@ -25,7 +25,7 @@ from lerobot.utils.import_utils import _pygame_available
 
 from ..gamepad.gamepad_utils import GamepadController
 from ..utils import TeleopEvents
-from .config_unitree_g1_ah_gamepad import GamepadLayout
+from .config_unitree_g1_gamepad import GamepadLayout
 
 if TYPE_CHECKING or _pygame_available:
     import pygame
@@ -33,8 +33,8 @@ else:
     pygame = None  # type: ignore[assignment]
 
 
-class UnitreeG1AhGamepadInput(GamepadController):
-    """Gamepad input reader for UnitreeG1Ah teleop: raw axes/buttons/hat plus episode events.
+class UnitreeG1GamepadInput(GamepadController):
+    """Gamepad input reader for Unitree G1 teleop: raw axes/buttons/hat plus episode events.
 
     Button indices come from `GamepadLayout` instead of the hardcoded ones in
     `GamepadController.update()`. `intervention_flag` (read back through the inherited
@@ -105,7 +105,7 @@ class UnitreeG1AhGamepadInput(GamepadController):
         return self.running
 
 
-def _dpad_from_buttons(gamepad: UnitreeG1AhGamepadInput, layout: GamepadLayout) -> tuple[int, int]:
+def _dpad_from_buttons(gamepad: UnitreeG1GamepadInput, layout: GamepadLayout) -> tuple[int, int]:
     right = int(gamepad.button(layout.dpad_right))
     left = int(gamepad.button(layout.dpad_left))
     up = int(gamepad.button(layout.dpad_up))
@@ -117,7 +117,7 @@ def probe(seconds: float = 20.0) -> None:
     """Print live axis/button/hat activity for the first connected gamepad.
 
     Use this to discover a pad's index layout for a `GamepadLayout` preset:
-    `python -m lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input --seconds 30`.
+    `python -m lerobot.teleoperators.unitree_g1_gamepad.gamepad_input --seconds 30`.
     """
     if not _pygame_available:
         print("pygame is not installed. Install it with: pip install 'lerobot[gamepad]'")

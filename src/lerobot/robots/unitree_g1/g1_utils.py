@@ -142,3 +142,25 @@ class G1_29_JointIndex(IntEnum):
     kRightWristRoll = 26
     kRightWristPitch = 27
     kRightWristYaw = 28
+
+
+# Body variants. Both keep the 29-slot SDK layout; the 23dof body (rev_1_0 hardware) has no
+# waist roll/pitch and no wrist pitch/yaw, so those slots are recorded as 0.0 and never commanded.
+BODIES = ("29dof", "23dof")
+REVISIONS = ("base", "rev_1_0")
+MODE_MACHINE_BY_REVISION = {"base": 1, "rev_1_0": 4}
+G1_23_INVALID_SDK_SLOTS = (13, 14, 20, 21, 27, 28)
+G1_LEG_SLOTS = tuple(range(12))
+
+BODY_KEYS = tuple(f"{joint.name}.q" for joint in G1_29_JointIndex)
+ARM_KEYS = tuple(f"{joint.name}.q" for joint in G1_29_JointArmIndex)
+
+
+def invalid_sdk_slots(body: str) -> tuple[int, ...]:
+    """SDK slots the given body has no motor for."""
+    return G1_23_INVALID_SDK_SLOTS if body == "23dof" else ()
+
+
+def invalid_body_keys(body: str) -> tuple[str, ...]:
+    """`.q` keys of the SDK slots the given body has no motor for."""
+    return tuple(f"{G1_29_JointIndex(slot).name}.q" for slot in invalid_sdk_slots(body))

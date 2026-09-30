@@ -20,28 +20,28 @@ from unittest.mock import patch
 
 import pytest
 
-from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS
-from lerobot.robots.unitree_g1_ah.g1_ah_joints import (
-    BODY_KEYS,
+from lerobot.robots.unitree_g1.end_effectors import (
+    AMAZING_HAND,
+    DEX1,
+    DEX3,
     HAND_CLOSURE_KEYS,
-    HEAD_KEYS,
-    TELEOP_ACTION_KEYS,
-    closure_to_hand_q,
-    default_action,
-    hand_motor_names,
-    hand_pose_rad,
+    HAND_SPECS,
+    amazing_hand_motor_names,
 )
-from lerobot.teleoperators.unitree_g1_ah_gamepad import (
-    UnitreeG1AhGamepadTeleop,
-    UnitreeG1AhGamepadTeleopConfig,
+from lerobot.robots.unitree_g1.g1_utils import BODY_KEYS, REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS
+from lerobot.robots.unitree_g1.heads import HEAD_KEYS
+from lerobot.teleoperators.unitree_g1_gamepad import (
+    UnitreeG1GamepadTeleop,
+    UnitreeG1GamepadTeleopConfig,
 )
-from lerobot.teleoperators.unitree_g1_ah_gamepad.config_unitree_g1_ah_gamepad import GamepadLayout
-from lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input import _dpad_from_buttons
+from lerobot.teleoperators.unitree_g1_gamepad.config_unitree_g1_gamepad import GamepadLayout
+from lerobot.teleoperators.unitree_g1_gamepad.gamepad_input import _dpad_from_buttons
+from lerobot.teleoperators.unitree_g1_gamepad.unitree_g1_gamepad import TELEOP_ACTION_KEYS, default_targets
 from lerobot.teleoperators.utils import TeleopEvents, make_teleoperator_from_config
 from lerobot.utils.errors import DeviceNotConnectedError
 from tests.utils import skip_if_package_missing
 
-_MODULE = "lerobot.teleoperators.unitree_g1_ah_gamepad.unitree_g1_ah_gamepad"
+_MODULE = "lerobot.teleoperators.unitree_g1_gamepad.unitree_g1_gamepad"
 
 
 class FakeInput:
@@ -92,8 +92,8 @@ class FakeInput:
 
 @pytest.fixture
 def teleop():
-    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
-        t = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig())
+    with patch(f"{_MODULE}.UnitreeG1GamepadInput", FakeInput):
+        t = UnitreeG1GamepadTeleop(UnitreeG1GamepadTeleopConfig())
         t.connect()
         yield t
         if t.is_connected:
@@ -102,7 +102,7 @@ def teleop():
 
 def test_action_features_are_teleop_action_keys(teleop):
     assert set(teleop.action_features) == set(TELEOP_ACTION_KEYS)
-    assert len(teleop.action_features) == 73
+    assert len(teleop.action_features) == 89
 
 
 def test_get_action_keys_match_action_features(teleop):
@@ -112,7 +112,7 @@ def test_get_action_keys_match_action_features(teleop):
 
 def test_idle_action_matches_default_and_zero_remote(teleop):
     action = teleop.get_action()
-    default = default_action()
+    default = default_targets()
     for key, value in default.items():
         assert action[key] == pytest.approx(value)
     for key in REMOTE_KEYS:
@@ -123,14 +123,14 @@ def test_idle_action_matches_default_and_zero_remote(teleop):
 
 def test_triggers_drive_waist_buttons_not_hands(teleop):
     layout = teleop.config.layout
-    default = default_action()
+    default = default_targets()
 
     teleop.gamepad.axes[layout.trigger_left] = 1.0
     action = teleop.get_action()
     assert action["remote.button.0"] == 1.0
     assert action["remote.button.4"] == 0.0
     for side in ("left", "right"):
-        for name in hand_motor_names(side):
+        for name in amazing_hand_motor_names(side):
             assert action[f"{name}.q"] == pytest.approx(default[f"{name}.q"])
 
     teleop.gamepad.axes[layout.trigger_left] = -1.0
@@ -195,16 +195,16 @@ def test_rb_closes_right_hand_only(teleop):
             clock["t"] += dt
             action = teleop.get_action()
 
-        closed_right = hand_pose_rad("right", True)
+        closed_right = AMAZING_HAND.closed_q["right"]
         for name, expected in zip(
-            hand_motor_names("right"),
+            amazing_hand_motor_names("right"),
             closed_right,
             strict=True,
         ):
             assert action[f"{name}.q"] == pytest.approx(expected, abs=1e-3)
 
-        default = default_action()
-        for name in hand_motor_names("left"):
+        default = default_targets()
+        for name in amazing_hand_motor_names("left"):
             key = f"{name}.q"
             assert action[key] == pytest.approx(default[key])
 
@@ -222,9 +222,9 @@ def test_rb_release_returns_to_open(teleop):
             clock["t"] += 0.02
             action = teleop.get_action()
 
-        open_right = hand_pose_rad("right", False)
+        open_right = AMAZING_HAND.open_q["right"]
         for name, expected in zip(
-            hand_motor_names("right"),
+            amazing_hand_motor_names("right"),
             open_right,
             strict=True,
         ):
@@ -265,8 +265,23 @@ def test_closure_matches_per_motor_targets(teleop, side):
             action = teleop.get_action()
             closure = action[f"k{side.capitalize()}Hand.closure"]
             assert 0.0 <= closure <= 1.0
-            motors = [action[f"{name}.q"] for name in hand_motor_names(side)]
-            assert motors == pytest.approx(closure_to_hand_q(side, closure), abs=1e-9)
+            motors = [action[f"{name}.q"] for name in amazing_hand_motor_names(side)]
+            assert motors == pytest.approx(AMAZING_HAND.closure_to_q(side, closure), abs=1e-9)
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_closure_sets_every_end_effector_joint(teleop, side):
+    button = teleop.config.layout.button_lb if side == "left" else teleop.config.layout.button_rb
+    clock = {"t": 0.0}
+    with patch(f"{_MODULE}.time.perf_counter", lambda: clock["t"]):
+        teleop.get_action()
+        action = _hold(teleop, clock, button, 0.5 / teleop.config.hand_blend_per_s)
+    closure = action[f"k{side.capitalize()}Hand.closure"]
+    assert closure == pytest.approx(0.5, abs=1e-6)
+    for spec in HAND_SPECS.values():
+        assert [action[key] for key in spec.joint_keys(side)] == pytest.approx(
+            spec.closure_to_q(side, closure)
+        )
 
 
 def test_lb_release_returns_left_closure_to_zero(teleop):
@@ -282,9 +297,9 @@ def test_lb_release_returns_left_closure_to_zero(teleop):
 
 
 def test_initial_closure_seeds_hand_blend():
-    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
-        t = UnitreeG1AhGamepadTeleop(
-            UnitreeG1AhGamepadTeleopConfig(
+    with patch(f"{_MODULE}.UnitreeG1GamepadInput", FakeInput):
+        t = UnitreeG1GamepadTeleop(
+            UnitreeG1GamepadTeleopConfig(
                 initial_positions={"kLeftHand.closure": 1.0, "kRightHand.closure": 0.25}
             )
         )
@@ -293,8 +308,8 @@ def test_initial_closure_seeds_hand_blend():
         t.disconnect()
     assert action["kLeftHand.closure"] == pytest.approx(1.0)
     assert action["kRightHand.closure"] == pytest.approx(0.25)
-    assert [action[f"{name}.q"] for name in hand_motor_names("left")] == pytest.approx(
-        hand_pose_rad("left", True)
+    assert [action[f"{name}.q"] for name in amazing_hand_motor_names("left")] == pytest.approx(
+        AMAZING_HAND.closed_q["left"]
     )
 
 
@@ -304,8 +319,8 @@ def _measured_obs(hand_closure=0.3):
     for side in ("left", "right"):
         obs.update(
             zip(
-                (f"{name}.q" for name in hand_motor_names(side)),
-                closure_to_hand_q(side, hand_closure),
+                (f"{name}.q" for name in amazing_hand_motor_names(side)),
+                AMAZING_HAND.closure_to_q(side, hand_closure),
                 strict=True,
             )
         )
@@ -320,8 +335,8 @@ def test_first_feedback_sets_targets_to_measured_pose(teleop):
         assert action[key] == pytest.approx(obs[key])
     for side in ("left", "right"):
         assert action[f"k{side.capitalize()}Hand.closure"] == pytest.approx(0.3)
-        assert [action[f"{name}.q"] for name in hand_motor_names(side)] == pytest.approx(
-            closure_to_hand_q(side, 0.3)
+        assert [action[f"{name}.q"] for name in amazing_hand_motor_names(side)] == pytest.approx(
+            AMAZING_HAND.closure_to_q(side, 0.3)
         )
 
 
@@ -330,6 +345,25 @@ def test_feedback_closure_keys_take_precedence_over_motor_angles(teleop):
     obs["kRightHand.closure"] = 0.8
     teleop.send_feedback(obs)
     assert teleop.get_action()["kRightHand.closure"] == pytest.approx(0.8)
+
+
+@pytest.mark.parametrize("spec", [DEX3, DEX1], ids=lambda spec: spec.name)
+def test_feedback_closure_from_dex_joints(teleop, spec):
+    obs = dict.fromkeys(BODY_KEYS, 0.0)
+    for side, closure in (("left", 0.2), ("right", 0.7)):
+        obs.update(zip(spec.joint_keys(side), spec.closure_to_q(side, closure), strict=True))
+    teleop.send_feedback(obs)
+    action = teleop.get_action()
+    assert action["kLeftHand.closure"] == pytest.approx(0.2)
+    assert action["kRightHand.closure"] == pytest.approx(0.7)
+    assert [action[key] for key in spec.joint_keys("right")] == pytest.approx(spec.closure_to_q("right", 0.7))
+
+
+def test_feedback_without_hand_state_keeps_hands_open(teleop):
+    teleop.send_feedback(dict.fromkeys(BODY_KEYS, 0.1))
+    action = teleop.get_action()
+    for key in HAND_CLOSURE_KEYS:
+        assert action[key] == 0.0
 
 
 def test_feedback_is_latched_once(teleop):
@@ -349,9 +383,9 @@ def test_feedback_without_full_body_is_ignored(teleop):
 
 
 def test_initial_positions_win_over_feedback():
-    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
-        t = UnitreeG1AhGamepadTeleop(
-            UnitreeG1AhGamepadTeleopConfig(initial_positions={"kLeftElbow.q": 0.5, "kLeftHand.closure": 1.0})
+    with patch(f"{_MODULE}.UnitreeG1GamepadInput", FakeInput):
+        t = UnitreeG1GamepadTeleop(
+            UnitreeG1GamepadTeleopConfig(initial_positions={"kLeftElbow.q": 0.5, "kLeftHand.closure": 1.0})
         )
         t.connect()
         t.send_feedback(_measured_obs(hand_closure=0.3))
@@ -402,9 +436,9 @@ def test_base_height_clipped_and_seeded(teleop):
             clock["t"] += 0.1
             action = teleop.get_action()
     assert action["kBaseHeight.cmd"] == pytest.approx(GROOT_BASE_HEIGHT_RANGE[1])
-    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
-        seeded = UnitreeG1AhGamepadTeleop(
-            UnitreeG1AhGamepadTeleopConfig(initial_positions={"kBaseHeight.cmd": 0.6})
+    with patch(f"{_MODULE}.UnitreeG1GamepadInput", FakeInput):
+        seeded = UnitreeG1GamepadTeleop(
+            UnitreeG1GamepadTeleopConfig(initial_positions={"kBaseHeight.cmd": 0.6})
         )
         seeded.connect()
         assert seeded.get_action()["kBaseHeight.cmd"] == pytest.approx(0.6)
@@ -426,8 +460,8 @@ def test_sticks_emit_nav_command(teleop):
 
 
 def test_nav_command_zero_without_remote_axes():
-    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
-        t = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig(emit_remote_axes=False))
+    with patch(f"{_MODULE}.UnitreeG1GamepadInput", FakeInput):
+        t = UnitreeG1GamepadTeleop(UnitreeG1GamepadTeleopConfig(emit_remote_axes=False))
         t.connect()
         t.gamepad.axes[t.config.layout.left_y] = -1.0
         action = t.get_action()
@@ -436,7 +470,7 @@ def test_nav_command_zero_without_remote_axes():
 
 
 def test_body_keys_never_change(teleop):
-    default = default_action()
+    default = default_targets()
     body_keys = list(BODY_KEYS)
 
     layout = teleop.config.layout
@@ -470,8 +504,8 @@ def test_remote_axes_passthrough_with_sign_convention(teleop):
 
 
 def test_emit_remote_axes_false_zeros_out():
-    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
-        t = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig(emit_remote_axes=False))
+    with patch(f"{_MODULE}.UnitreeG1GamepadInput", FakeInput):
+        t = UnitreeG1GamepadTeleop(UnitreeG1GamepadTeleopConfig(emit_remote_axes=False))
         t.connect()
         t.gamepad.axes[t.config.layout.left_x] = 0.9
         action = t.get_action()
@@ -482,9 +516,9 @@ def test_emit_remote_axes_false_zeros_out():
 
 
 def test_initial_positions_override_applied():
-    cfg = UnitreeG1AhGamepadTeleopConfig(initial_positions={"kHeadYaw.q": 0.3})
-    with patch(f"{_MODULE}.UnitreeG1AhGamepadInput", FakeInput):
-        t = UnitreeG1AhGamepadTeleop(cfg)
+    cfg = UnitreeG1GamepadTeleopConfig(initial_positions={"kHeadYaw.q": 0.3})
+    with patch(f"{_MODULE}.UnitreeG1GamepadInput", FakeInput):
+        t = UnitreeG1GamepadTeleop(cfg)
         t.connect()
         action = t.get_action()
         assert action["kHeadYaw.q"] == pytest.approx(0.3)
@@ -492,9 +526,9 @@ def test_initial_positions_override_applied():
 
 
 def test_initial_positions_invalid_key_raises():
-    cfg = UnitreeG1AhGamepadTeleopConfig(initial_positions={"not_a_real_key.q": 0.0})
+    cfg = UnitreeG1GamepadTeleopConfig(initial_positions={"not_a_real_key.q": 0.0})
     with pytest.raises(ValueError):
-        UnitreeG1AhGamepadTeleop(cfg)
+        UnitreeG1GamepadTeleop(cfg)
 
 
 def test_get_teleop_events_maps_success_failure_rerecord(teleop):
@@ -516,8 +550,8 @@ def test_get_teleop_events_maps_success_failure_rerecord(teleop):
 
 
 def test_make_teleoperator_from_config_returns_class_without_connecting():
-    teleop = make_teleoperator_from_config(UnitreeG1AhGamepadTeleopConfig())
-    assert isinstance(teleop, UnitreeG1AhGamepadTeleop)
+    teleop = make_teleoperator_from_config(UnitreeG1GamepadTeleopConfig())
+    assert isinstance(teleop, UnitreeG1GamepadTeleop)
     assert not teleop.is_connected
 
 
@@ -528,13 +562,13 @@ def test_disconnect_idempotent(teleop):
 
 
 def test_get_action_before_connect_raises():
-    teleop = UnitreeG1AhGamepadTeleop(UnitreeG1AhGamepadTeleopConfig())
+    teleop = UnitreeG1GamepadTeleop(UnitreeG1GamepadTeleopConfig())
     with pytest.raises(DeviceNotConnectedError):
         teleop.get_action()
 
 
 def test_default_config_uses_dualshock4_hidapi_preset():
-    cfg = UnitreeG1AhGamepadTeleopConfig()
+    cfg = UnitreeG1GamepadTeleopConfig()
     assert cfg.preset == "dualshock4_hidapi"
     assert cfg.layout.button_rb == 10
     assert cfg.layout.hat is None
@@ -543,7 +577,7 @@ def test_default_config_uses_dualshock4_hidapi_preset():
 
 
 def test_xbox_preset_gives_expected_layout():
-    cfg = UnitreeG1AhGamepadTeleopConfig(preset="xbox")
+    cfg = UnitreeG1GamepadTeleopConfig(preset="xbox")
     assert cfg.layout.button_rb == 5
     assert cfg.layout.hat == 0
     assert cfg.layout.dpad_up is None
@@ -551,20 +585,20 @@ def test_xbox_preset_gives_expected_layout():
 
 
 def test_dualshock4_kernel_preset_gives_expected_layout():
-    cfg = UnitreeG1AhGamepadTeleopConfig(preset="dualshock4_kernel")
+    cfg = UnitreeG1GamepadTeleopConfig(preset="dualshock4_kernel")
     assert cfg.layout.button_rb == 5
     assert cfg.layout.button_y == 2
     assert (cfg.layout.trigger_left, cfg.layout.trigger_right) == (2, 5)
 
 
 def test_explicit_layout_override_preserved_with_default_preset():
-    cfg = UnitreeG1AhGamepadTeleopConfig(layout=GamepadLayout(button_rb=99))
+    cfg = UnitreeG1GamepadTeleopConfig(layout=GamepadLayout(button_rb=99))
     assert cfg.layout.button_rb == 99
 
 
 def test_invalid_preset_raises():
     with pytest.raises(ValueError):
-        UnitreeG1AhGamepadTeleopConfig(preset="not_a_real_preset")
+        UnitreeG1GamepadTeleopConfig(preset="not_a_real_preset")
 
 
 def test_dpad_buttons_tilt_same_as_hat(teleop):
@@ -597,20 +631,20 @@ class _FakeJoystick:
 
 @skip_if_package_missing("pygame")
 def test_hat_uses_dpad_buttons_when_configured():
-    from lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input import UnitreeG1AhGamepadInput
+    from lerobot.teleoperators.unitree_g1_gamepad.gamepad_input import UnitreeG1GamepadInput
 
     layout = GamepadLayout.dualshock4_hidapi()
-    gamepad = UnitreeG1AhGamepadInput(layout, deadzone=0.1)
+    gamepad = UnitreeG1GamepadInput(layout, deadzone=0.1)
     gamepad.joystick = _FakeJoystick(numhats=0, buttons={layout.dpad_right, layout.dpad_up})
     assert gamepad.hat() == (1, 1)
 
 
 @skip_if_package_missing("pygame")
 def test_hat_falls_back_to_hat_axis_when_no_dpad_buttons():
-    from lerobot.teleoperators.unitree_g1_ah_gamepad.gamepad_input import UnitreeG1AhGamepadInput
+    from lerobot.teleoperators.unitree_g1_gamepad.gamepad_input import UnitreeG1GamepadInput
 
     layout = GamepadLayout.dualshock4_kernel()
-    gamepad = UnitreeG1AhGamepadInput(layout, deadzone=0.1)
+    gamepad = UnitreeG1GamepadInput(layout, deadzone=0.1)
     gamepad.joystick = _FakeJoystick(numhats=1, hat_value=(-1, 1))
     assert gamepad.hat() == (-1, 1)
 
