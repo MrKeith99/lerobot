@@ -6,7 +6,7 @@
   style={{ width: "100%" }}
 />
 
-The Unitree G1 humanoid is now supported in LeRobot! You can teleoperate, train locomanipulation policies, test in sim, and more. Both 29 and 23 DoF variants are supported.
+The Unitree G1 humanoid is now supported in LeRobot! You can teleoperate, train locomanipulation policies, test in sim, and more. Both 29 and 23 DoF bodies are supported, with Dex1 grippers, Dex3 hands or AmazingHands and an optional pan/tilt head camera (see [Part 5: Embodiments](#part-5-embodiments)).
 
 ---
 
@@ -42,7 +42,7 @@ pip install -e '.[unitree_g1]'
 
 ### Test the Installation (Simulation)
 
-The simulation environment has its own dependencies. Check the Simulation environment dependencies: [Unitree G1 Mujoco EnvHub](https://huggingface.co/lerobot/unitree-g1-mujoco/tree/main).
+The simulation environment has its own dependencies. Check the Simulation environment dependencies: [Unitree G1 Mujoco EnvHub](https://huggingface.co/k-valentin/unitree-g1-mujoco/tree/main).
 
 ```bash
 pip install mujoco loguru msgpack msgpack-numpy
@@ -59,7 +59,7 @@ lerobot-teleoperate \
   --robot.controller=GrootLocomotionController
 ```
 
-This will launch a [MuJoCo sim instance](https://huggingface.co/lerobot/unitree-g1-mujoco/tree/main) for the G1. You can connect a gamepad to your machine before launching in order to control the robot's locomotion in sim. We support both [HolosomaLocomotionController](https://github.com/amazon-far/holosoma) and [GrootLocomotionController](https://github.com/NVlabs/GR00T-WholeBodyControl) via `--robot.controller`.
+This will launch a [MuJoCo sim instance](https://huggingface.co/k-valentin/unitree-g1-mujoco/tree/main) for the G1. You can connect a gamepad to your machine before launching in order to control the robot's locomotion in sim. We support both [HolosomaLocomotionController](https://github.com/amazon-far/holosoma) and [GrootLocomotionController](https://github.com/NVlabs/GR00T-WholeBodyControl) via `--robot.controller`.
 
 - Press `9` to release the robot
 - Press `7` / `8` to increase / decrease waist height
@@ -318,6 +318,226 @@ lerobot-rollout \
 
 ---
 
+## Part 5: Embodiments
+
+One robot type, `unitree_g1`, covers every G1 variant. Pick the body, end effector and head with
+three config fields, the same options as the MuJoCo sim's `BODY` / `END_EFFECTOR` / `HEAD`:
+
+| Field                  | Values                                                                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--robot.body`         | `29dof` (default), `23dof` (no waist roll/pitch, no wrist pitch/yaw)                                                                                             |
+| `--robot.end_effector` | `none` (default), `dex1` (Unitree Dex1-1 gripper), `dex3` (Unitree Dex3-1 hand), `amazing_hand` (Pollen Robotics AmazingHand, 8 Feetech SCS0009 servos per hand) |
+| `--robot.head`         | `none` (default), `d455_pan_tilt` (Dynamixel XL330 pan/tilt carrying an Intel RealSense D455)                                                                    |
+
+Supported combinations, matching the sim: `dex1` and `dex3` need the `29dof` body; `amazing_hand`
+needs the `23dof` body and the `d455_pan_tilt` head (and vice versa). The dataset `robot_type` and
+the calibration id are derived from them, e.g. `unitree_g1_29dof_dex3` or
+`unitree_g1_23dof_amazing_hand_d455_pan_tilt`.
+
+| Embodiment                       | How the extras are driven                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `dex3`                           | DDS `rt/dex3/{left,right}/{cmd,state}` (`HandCmd_` / `HandState_`), 7 joints per hand       |
+| `dex1`                           | DDS `rt/dex1/{left,right}/{cmd,state}` (`MotorCmds_` / `MotorStates_`), 1 position per side |
+| `amazing_hand` + `d455_pan_tilt` | head/hand ZMQ bridge (ports 6002/6003) to the Dynamixel head bus and the Feetech hand bus   |
+
+### Joint layout
+
+Every embodiment records the stock layout with its extras appended: the 29-slot SDK body (or the
+14 arm joints with a locomotion controller), then the head, then the hands, then (with a
+controller) the navigation and base-height commands. All keys follow the Unitree SDK style
+(`k` + CamelCase); `.q` is a position (rad, or m for `dex1`), `.closure` a hand closure in [0, 1].
+
+| Part            | Keys                                                                                                                                                                   |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Body            | `kLeftHipPitch.q` … `kRightWristYaw.q`, SDK slots 0–28 (`G1_29_JointIndex`)                                                                                            |
+| Head            | `kHeadYaw.q` (pan, Dynamixel ID 1), `kHeadPitch.q` (tilt, ID 2)                                                                                                        |
+| `dex3` hands    | `k{Left,Right}Hand{Thumb0,Thumb1,Thumb2,Middle0,Middle1,Index0,Index1}.q`                                                                                              |
+| `dex1` grippers | `k{Left,Right}Gripper.q` (finger travel in m, 0.0245 open)                                                                                                             |
+| `amazing_hand`  | `kLeftHandMotor11.q` … `kLeftHandMotor18.q`, `kRightHandMotor1.q` … `kRightHandMotor8.q` (by Feetech motor ID; per hand, 2 servos each for index, middle, ring, thumb) |
+
+**Unused SDK slots.** The `23dof` body is a 29-slot SDK message with no motor at slots 13, 14
+(waist roll/pitch) and 20, 21, 27, 28 (wrist pitch/yaw). Their gains are zeroed and they are never
+commanded; `get_observation` reports them as exactly 0.0, so the columns stay compatible with
+`29dof` datasets.
+
+**`revision` / `mode_machine`.** With the `23dof` body, `--robot.revision` (`base` or `rev_1_0`,
+default) must match the robot's DDS `mode_machine` (1 or 4). `connect()` raises `ValueError` on a
+mismatch before sending any command; `--robot.check_mode_machine=false` skips the check.
+
+### Hand representation
+
+`--robot.hand_representation` chooses how any hand appears in `action` and `observation.state`:
+
+| Value               | Hand keys                                                          |
+| ------------------- | ------------------------------------------------------------------ |
+| `closure` (default) | `kLeftHand.closure`, `kRightHand.closure`                          |
+| `per_motor`         | every hand joint or servo (16 `amazing_hand`, 14 `dex3`, 2 `dex1`) |
+
+A closure `c` is mapped to the hand's joints by interpolating linearly between its open and closed
+poses (`end_effectors.py`: `AMAZING_HAND`, `DEX3`, `DEX1`); values outside [0, 1] are clipped. The
+measured closure is the mean, over the joints, of each joint's position along its open→closed range.
+In `closure` mode `get_observation()` also returns the per-joint values, but they aren't recorded.
+
+For the 23dof AmazingHand robot, `observation.state` / `action` have 33 / 33 columns without a
+controller and 18 / 22 with `GrootLocomotionController` (47 / 47 and 32 / 36 with `per_motor`).
+
+### Robot server
+
+The server gains flags for the extras:
+
+```bash
+# Dex3 hands (or --hands dex1)
+python src/lerobot/robots/unitree_g1/run_g1_server.py --camera --hands dex3
+
+# 23dof + AmazingHand + pan/tilt D455
+python src/lerobot/robots/unitree_g1/run_g1_server.py \
+  --headhand --camera --camera-type intelrealsense --camera-serial <D455_SERIAL>
+```
+
+- `--hands dex3|dex1` bridges the hand DDS topics on ZMQ ports 6010–6017.
+- `--headhand` runs the head/hand bridge (`HeadHandServer`, ports 6002/6003) on the Dynamixel head
+  bus (`--head-port`, default `/dev/ttyCH341USB0`) and the Feetech hand bus (`--hand-port`,
+  default `/dev/ttyACM0`). `--no-handshake` skips the bus handshake for firmware that doesn't answer
+  it; `--headhand-rate` sets the state rate (default 50 Hz).
+- On startup the server prints `mode_machine=<n>`; check it against `--robot.revision`.
+
+### AmazingHand + pan/tilt D455 setup (Jetson)
+
+1. Install LeRobot with the `unitree_g1` extra (it includes the Dynamixel, Feetech, gamepad and
+   RealSense dependencies).
+2. Add your user to `dialout` for the head/hand serial ports: `sudo usermod -aG dialout $USER`, then
+   log in again. Pin drifting device names with a udev rule on `ID_SERIAL_SHORT`.
+3. The `pyrealsense2` wheel is x86_64 only; on the Jetson build librealsense from source
+   ([guide](https://github.com/IntelRealSense/librealsense/blob/master/doc/installation_jetson.md)).
+4. Scan the buses: `python -m lerobot.robots.unitree_g1.headhand_devices scan` should report model
+   `1200` (XL330-M288) for head IDs 1–2 and `1284` (SCS0009) for hand IDs 1–8 and 11–18. `None`
+   means no reply: check wiring and IDs.
+5. Find the D455 serial with `RealSenseCamera.find_cameras()`
+   (`lerobot.cameras.realsense.camera_realsense`).
+
+<Tip warning={true}>
+  The server releases Unitree's built-in balance controller: there is no fall
+  catching. Use a gantry unless you are testing a locomotion controller in a
+  cleared area. Without a controller the legs hold their connect-time pose;
+  `--robot.freeze_legs=true` makes them limp instead. `disconnect()`
+  zero-torques the body, but the AmazingHand servos keep torque: run `python -m
+  lerobot.robots.unitree_g1.headhand_devices torque-off` on the Jetson (or
+  power-cycle).
+</Tip>
+
+### Calibrate the head and hands
+
+Only the head/hand bridge motors need calibration (the body and Dex hands report joint angles):
+
+```bash
+lerobot-calibrate \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head=d455_pan_tilt \
+  --robot.is_simulation=false --robot.robot_ip=192.168.123.164 --robot.id=lab_g1
+```
+
+1. Center the head (camera forward, level) and press Enter.
+2. Turn the head to the robot's left and tilt it up slightly, then press Enter: this sets each
+   servo's direction.
+3. Sweep pan and tilt to both mechanical stops, then press Enter.
+4. Hands: press Enter to import the lab's per-servo zero trims, or type `i` for an interactive
+   neutral-pose + sweep calibration.
+
+The calibration is written to
+`~/.cache/huggingface/lerobot/calibration/robots/<robot_type>/<id>.json`. Calibration files that use
+the pre-rename motor names (`xl330_joint`, `d455_joint`, `{side}_hand_finger{i}_motor{j}`) are
+renamed on load. A calibration made with the former `unitree_g1_23dof_ah8_d455_2dof` robot type
+can be moved to `.../robots/unitree_g1_23dof_amazing_hand_d455_pan_tilt/`.
+
+### Teleoperate with a gamepad or the keyboard
+
+`unitree_g1_gamepad` (DualShock 4 / Xbox via pygame) and `unitree_g1_keyboard` (no pad) work with
+every embodiment: they emit the body, head, every end effector's joints and the closures, and the
+robot keeps the keys it has. They start from the robot's measured pose, so nothing moves at connect;
+`--teleop.initial_positions='{"kLeftElbow.q": 1.2}'` pins chosen keys instead.
+
+```bash
+lerobot-record \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head=d455_pan_tilt \
+  --robot.is_simulation=false --robot.robot_ip=192.168.123.164 --robot.id=lab_g1 \
+  --robot.controller=GrootLocomotionController \
+  --robot.cameras='{"head_camera": {"type": "zmq", "server_address": "192.168.123.164", "port": 5555, "camera_name": "head_camera", "width": 640, "height": 480, "fps": 30}}' \
+  --teleop.type=unitree_g1_gamepad \
+  --dataset.repo_id=your-username/dataset-name \
+  --dataset.single_task="Test" \
+  --dataset.num_episodes=2 \
+  --dataset.episode_time_s=5 \
+  --dataset.reset_time_s=5
+```
+
+| Gamepad (DualShock 4 / Xbox) | Keyboard        | Action                                                              |
+| ---------------------------- | --------------- | ------------------------------------------------------------------- |
+| D-pad left/right, up/down    | Arrow keys      | Head pan / tilt (0.8 rad/s; `--teleop.invert_tilt=true` flips tilt) |
+| R1 / L1 (RB / LB)            | `e` / `q`       | Hold to close the right / left hand (closure 0 → 1 at 2.0/s)        |
+| L2 / R2 (LT / RT)            | —               | Raise / lower `kBaseHeight.cmd` (`GrootLocomotionController`)       |
+| Left stick                   | `w a s d`       | Walk: `kNavVx.cmd` / `kNavVy.cmd`, with a controller                |
+| Right stick x                | `j` / `l`       | Turn: `kNavYawRate.cmd`                                             |
+| Triangle / Cross / Square    | `y` / `n` / `r` | End episode: success / failure / rerecord                           |
+| Options (Start)              | Space           | Hold for intervention                                               |
+
+The gamepad has presets for SDL2's HIDAPI PS4 driver (`dualshock4_hidapi`, default), the kernel
+`hid-sony` driver (`dualshock4_kernel`) and Xbox pads (`xbox`): `--teleop.preset=...`, or override
+single indices (`--teleop.layout.button_rb=<idx>`). Find your pad's indices with
+`python -m lerobot.teleoperators.unitree_g1_gamepad.gamepad_input --seconds 30`. The keyboard reads
+keys from a small window by default (works on Wayland); `--teleop.backend=pynput` captures them
+globally on X11.
+
+### Simulation
+
+[`k-valentin/unitree-g1-mujoco`](https://huggingface.co/k-valentin/unitree-g1-mujoco), the default
+`--robot.sim_env_repo_id`, models every supported combination; the robot passes its embodiment to it
+as `UNITREE_G1_MUJOCO_BODY` / `_END_EFFECTOR` / `_HEAD`. For the AmazingHand variant the sim runs the
+same head/hand ZMQ bridge on localhost as the Jetson, and writes a default head/hand calibration.
+
+```bash
+# 23dof + AmazingHand + pan/tilt D455 with the gamepad. PS toggles the elastic band; the sim reset
+# moves to Share (8) because Options (9) is the gamepad's intervention button.
+lerobot-teleoperate \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head=d455_pan_tilt \
+  --robot.is_simulation=true --robot.id=sim --robot.sim_reset_button=8 \
+  --teleop.type=unitree_g1_gamepad \
+  --robot.cameras='{"head": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"head_camera","width":640,"height":480,"fps":30,"warmup_s":5}}' \
+  --display_data=true
+
+# 29dof + Dex3 hands with the keyboard
+lerobot-teleoperate \
+  --robot.type=unitree_g1 --robot.end_effector=dex3 --robot.is_simulation=true \
+  --teleop.type=unitree_g1_keyboard
+```
+
+Other sim options still come from `UNITREE_G1_MUJOCO_<OPTION>` environment variables (`ONSCREEN=0`
+for headless, `JOYSTICK_TYPE=dualshock4|xbox|switch`, `HEADHAND_STATE_PORT`, `HEADHAND_CMD_PORT`).
+While the elastic band holds the robot the locomotion controller is paused and the legs go limp. On
+GNOME Wayland launch with `PYGLFW_LIBRARY_VARIANT=x11 SDL_VIDEODRIVER=x11` (GLFW and SDL2 otherwise
+deadlock in libdecor-gtk). After `disconnect()` the process may not exit on its own because of
+CycloneDDS finalizers; kill it and its `multiprocessing.spawn` image-publisher child.
+
+<Tip>
+  With Python 3.12, `unitree_sdk2py` needs CycloneDDS 0.10.x built from source: build the
+  `releases/0.10.x` branch, `export CYCLONEDDS_HOME=<install prefix>` in every shell, then
+  `pip install --no-binary cyclonedds "cyclonedds==0.10.2"` and `pip install --no-deps -e <unitree_sdk2_python>`.
+</Tip>
+
+### Troubleshooting
+
+- **`mode_machine=<n> does not match revision ...`**: pass the `--robot.revision` matching the
+  server's `mode_machine=<n>` line (`base` = 1, `rev_1_0` = 4), or `--robot.check_mode_machine=false`.
+- **Head/hand connect times out**: the robot waits `--robot.headhand_timeout_s` (5 s) for the first
+  head/hand state. Check that the server printed `Head/hand bridge started`, that
+  `--robot.headhand_state_port` / `--robot.headhand_cmd_port` match its ports, and that no firewall
+  blocks 6002/6003.
+- **"Head/hand state is stale"**: the last state is older than `--robot.headhand_stale_warn_s`
+  (0.5 s); the bridge thread died or the network stalled. Check the server log.
+- **Handshake errors on the head or hand bus**: retry the server with `--no-handshake`.
+- **Dex1 on real hardware**: the gripper's motor range (`DEX1_REAL_OPEN_Q` / `DEX1_REAL_CLOSED_Q`
+  in `dex_hands.py`) is not yet verified on hardware.
+
+---
+
 ## Additional Resources
 
 - [Unitree SDK Documentation](https://github.com/unitreerobotics/unitree_sdk2_python)
@@ -328,4 +548,4 @@ lerobot-rollout \
 
 ---
 
-_Last updated: March 2026_
+_Last updated: September 2026_
