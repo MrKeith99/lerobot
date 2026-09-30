@@ -528,7 +528,7 @@ the robot's forward direction and press A.
 | X / Y                    | Hold to lower / raise `kBaseHeight.cmd`                                           |
 | Right / left stick click | End episode: success / rerecord                                                   |
 
-Nothing moves until A, and targets hold while tracking is lost. `--teleop.input_mode=hand` uses hand
+Nothing moves until A; the arms then move to your pose at `--teleop.engage_arm_speed_rad_s` (0.5) before following at full speed, and targets hold while tracking is lost. `--teleop.input_mode=hand` uses hand
 tracking (pinch closes the hand; it engages when tracking starts). The headset shows pass-through
 only for now; the head camera view comes next.
 

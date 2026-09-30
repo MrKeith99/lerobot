@@ -66,6 +66,7 @@ from .config_unitree_g1_xr import UnitreeG1XRTeleopConfig
 logger = logging.getLogger(__name__)
 
 _DT_CAP_S = 0.1
+_CAUGHT_UP_RAD = 0.05
 # GrootLocomotionController's waist raise/lower slots, as in the gamepad teleop.
 _WAIST_RAISE_KEY = "remote.button.0"
 _WAIST_LOWER_KEY = "remote.button.4"
@@ -108,6 +109,7 @@ class UnitreeG1XRTeleop(Teleoperator):
             self._set_closure(side, 0.0)
 
         self._engaged = False
+        self._catching_up = False
         self._auto_engaged = False
         self._robot_type_checked = False
         self._synced_to_robot = False
@@ -232,14 +234,21 @@ class UnitreeG1XRTeleop(Teleoperator):
         ]
         self.arm_ik.reset(q)
         self._engaged = True
+        self._catching_up = True
         logger.info("XR teleop engaged")
 
     def _step_arms(self, frame: Any, dt: float) -> None:
         solution = self.arm_ik.solve(frame.wrists["left"], frame.wrists["right"])
-        max_step = self.config.max_arm_speed_rad_s * dt
+        # Right after engaging the operator's pose may be far from the robot's: approach it slowly.
+        speed = self.config.engage_arm_speed_rad_s if self._catching_up else self.config.max_arm_speed_rad_s
+        max_step = speed * dt
+        gap = 0.0
         for name, q in zip(self.arm_ik.joint_names, solution.q, strict=True):
             key = arm_key(name)
             self._target[key] = _step_toward(self._target[key], float(q), max_step)
+            gap = max(gap, abs(self._target[key] - float(q)))
+        if gap < _CAUGHT_UP_RAD:
+            self._catching_up = False
 
     def _step_head(self, frame: Any, dt: float) -> None:
         pitch = -frame.head_pitch if self.config.invert_head_pitch else frame.head_pitch

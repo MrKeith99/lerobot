@@ -50,6 +50,8 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     # Local sim checkout for the arm kinematics; default: the sim's Hub snapshot (MJCF only).
     sim_root: str | None = None
     max_arm_speed_rad_s: float = 3.0
+    # Arm speed after engaging, until the arms reach the operator's pose.
+    engage_arm_speed_rad_s: float = 0.5
     head_speed_rad_s: float = 4.0
     hand_blend_per_s: float = 4.0
     invert_head_pitch: bool = False

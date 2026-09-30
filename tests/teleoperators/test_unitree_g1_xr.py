@@ -191,7 +191,7 @@ def test_engaging_recenters_and_starts_from_the_measured_arms(clock):
 
 
 def test_arm_targets_follow_the_ik_at_the_speed_limit(clock):
-    teleop = make_teleop(clock, max_arm_speed_rad_s=2.0)
+    teleop = make_teleop(clock, max_arm_speed_rad_s=2.0, engage_arm_speed_rad_s=2.0)
     teleop.send_feedback(observation())
     press(teleop, clock, "a")
     before = step(teleop, clock)["kLeftElbow.q"]
@@ -308,3 +308,16 @@ def test_arms_reach_wrist_targets_with_the_composed_model_ik(clock):
     reached = ik.forward(np.array([action[arm_key(name)] for name in ik.joint_names]))
     for side in ("left", "right"):
         assert np.linalg.norm(reached[side][:3, 3] - wrists[side][:3, 3]) < 0.02
+
+
+def test_arms_approach_the_operator_slowly_after_engaging(clock):
+    teleop = make_teleop(clock, max_arm_speed_rad_s=3.0, engage_arm_speed_rad_s=0.5)
+    teleop.send_feedback(observation())
+    teleop.arm_ik.solution[:] = 1.0
+    press(teleop, clock, "a")
+    before = step(teleop, clock)["kLeftElbow.q"]
+    assert step(teleop, clock)["kLeftElbow.q"] - before == pytest.approx(0.5 * DT)
+    step(teleop, clock, n=200)
+    teleop.arm_ik.solution[:] = 0.0
+    before = step(teleop, clock)["kLeftElbow.q"]
+    assert before - step(teleop, clock)["kLeftElbow.q"] == pytest.approx(3.0 * DT)
