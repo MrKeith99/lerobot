@@ -102,6 +102,7 @@ from lerobot.robots import (  # noqa: F401
     unitree_g1 as unitree_g1_robot,
 )
 from lerobot.robots.unitree_g1 import UnitreeG1
+from lerobot.robots.unitree_g1.g1_utils import ROBOT_TYPE_FEEDBACK_KEY
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
     TeleoperatorConfig,
@@ -123,6 +124,7 @@ from lerobot.teleoperators import (  # noqa: F401
     unitree_g1,
     unitree_g1_gamepad,
     unitree_g1_keyboard,
+    unitree_g1_xr,
 )
 from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.robot_utils import precise_sleep
@@ -198,7 +200,7 @@ def teleop_loop(
         obs = robot.get_observation()
 
         if isinstance(robot, UnitreeG1):
-            teleop.send_feedback(obs)
+            teleop.send_feedback({**obs, ROBOT_TYPE_FEEDBACK_KEY: robot.name})
 
         # Get teleop action
         raw_action = teleop.get_action()

@@ -491,6 +491,47 @@ single indices (`--teleop.layout.button_rb=<idx>`). Find your pad's indices with
 keys from a small window by default (works on Wayland); `--teleop.backend=pynput` captures them
 globally on X11.
 
+### Teleoperate with an XR headset (Quest 3)
+
+`unitree_g1_xr` drives the arms from the controllers' (or tracked hands') wrist poses, the pan/tilt head
+from the headset and the hands from the triggers. It is a thin adapter over our
+[xr_teleoperate fork](https://github.com/MrKeith99/xr_teleoperate)'s `xr_teleoperate.core`, whose arm IK
+is built from the sim's composed model of the same embodiment, so it covers every body and end effector.
+Give it the robot's four embodiment fields; it refuses a robot of another embodiment.
+
+```bash
+pip install -e ".[unitree_g1_xr]"
+# televuer pins numpy<2, so install it without its dependencies from the fork's checkout
+git clone --recurse-submodules https://github.com/MrKeith99/xr_teleoperate
+pip install -e xr_teleoperate/teleop/televuer --no-deps
+# The headset needs HTTPS: a self-signed certificate where televuer looks for it
+mkdir -p ~/.config/xr_teleoperate && cd ~/.config/xr_teleoperate && \
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem -subj "/CN=xr"
+
+lerobot-teleoperate \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head_mount=pan_tilt --robot.head_sensor=d455 \
+  --robot.is_simulation=true --robot.controller=GrootLocomotionController \
+  --teleop.type=unitree_g1_xr --teleop.body=23dof --teleop.end_effector=amazing_hand --teleop.head_mount=pan_tilt --teleop.head_sensor=d455
+```
+
+Open `https://<host>:8012` in the Quest browser (accept the certificate), enter VR, then stand facing
+the robot's forward direction and press A.
+
+| Quest controllers        | Action                                                                            |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| A                        | Engage / disengage: recenter on your facing direction, start from the arm pose    |
+| B                        | Stop: hold every target and stop walking until A re-engages                       |
+| Controller poses         | Arm IK targets (`--teleop.max_arm_speed_rad_s`, default 3.0)                      |
+| Headset yaw / pitch      | `kHeadYaw.q` / `kHeadPitch.q` with a pan/tilt head (`--teleop.invert_head_pitch`) |
+| Triggers                 | Left / right hand closure                                                         |
+| Left stick, right x      | Walk / turn: `kNavVx/Vy/YawRate.cmd`                                              |
+| X / Y                    | Hold to lower / raise `kBaseHeight.cmd`                                           |
+| Right / left stick click | End episode: success / rerecord                                                   |
+
+Nothing moves until A, and targets hold while tracking is lost. `--teleop.input_mode=hand` uses hand
+tracking (pinch closes the hand; it engages when tracking starts). The headset shows pass-through
+only for now; the head camera view comes next.
+
 ### Simulation
 
 [`k-valentin/unitree-g1-mujoco`](https://huggingface.co/k-valentin/unitree-g1-mujoco), the default

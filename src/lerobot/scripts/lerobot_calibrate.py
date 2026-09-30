@@ -69,6 +69,7 @@ from lerobot.teleoperators import (  # noqa: F401
     unitree_g1 as unitree_g1_teleop,
     unitree_g1_gamepad,
     unitree_g1_keyboard,
+    unitree_g1_xr,
 )
 from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.utils import init_logging

@@ -133,6 +133,7 @@ from lerobot.robots import (  # noqa: F401
     unitree_g1 as unitree_g1_robot,
 )
 from lerobot.robots.unitree_g1 import UnitreeG1
+from lerobot.robots.unitree_g1.g1_utils import ROBOT_TYPE_FEEDBACK_KEY
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
     TeleoperatorConfig,
@@ -152,6 +153,7 @@ from lerobot.teleoperators import (  # noqa: F401
     unitree_g1,
     unitree_g1_gamepad,
     unitree_g1_keyboard,
+    unitree_g1_xr,
 )
 from lerobot.teleoperators.keyboard import KeyboardTeleop
 from lerobot.utils.constants import ACTION, OBS_STR
@@ -301,7 +303,7 @@ def record_loop(
         # Get action from teleop
         if isinstance(teleop, Teleoperator):
             if isinstance(robot, UnitreeG1):
-                teleop.send_feedback(obs)
+                teleop.send_feedback({**obs, ROBOT_TYPE_FEEDBACK_KEY: robot.name})
             act = teleop.get_action()
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor

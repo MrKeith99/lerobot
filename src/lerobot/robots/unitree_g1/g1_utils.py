@@ -39,6 +39,9 @@ GROOT_BASE_HEIGHT_RATE = 0.05  # m/s
 # Absolute navigation command (vx, vy, yaw rate) consumed by the locomotion controllers, recorded as
 # an action in controller mode. Derived from the remote sticks as (ly, -lx, -rx).
 NAV_KEYS = ("kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd")
+# Feedback entry the record/teleoperate scripts add to a G1 observation for the teleoperator: the robot's
+# `robot_type`, e.g. for an XR teleop to refuse a robot of another embodiment.
+ROBOT_TYPE_FEEDBACK_KEY = "robot_type"
 
 
 def nav_from_remote(lx: float, ly: float, rx: float) -> dict[str, float]:

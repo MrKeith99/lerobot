@@ -192,6 +192,15 @@ unitree_g1 = [
     "lerobot[gamepad]",
     "lerobot[intelrealsense]",
 ]
+# XR headset teleop (unitree_g1_xr): the xr_teleoperate fork's core and televuer's Vuer. televuer itself pins
+# numpy<2; install it from the fork's checkout with `pip install -e teleop/televuer --no-deps`.
+unitree_g1_xr = [
+    "lerobot[unitree_g1]",
+    "xr_teleoperate @ git+https://github.com/MrKeith99/xr_teleoperate@17af4a2",
+    "vuer[all]==0.0.60",
+    "params-proto<3",  # vuer 0.0.60 uses its 2.x API
+    "logging-mp",
+]
 # reachy2-sdk caps grpcio<=1.73.1 and protobuf<=6.32.0; quarantined here so downstream users aren't held back. reachy2-sdk is unlikely to release new versions.
 reachy2 = [
     "reachy2_sdk>=1.0.15,<1.1.0",
