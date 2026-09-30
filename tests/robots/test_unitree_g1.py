@@ -334,7 +334,7 @@ def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
         mock_make_env.assert_called_once_with(robot.config.sim_env_repo_id, trust_remote_code=True)
         assert robot.sim_env is fake_inner_env
     # The sim gets the embodiment through its environment variables
-    assert seen_env == dict(zip(embodiment_vars, ("29dof", "none", "none"), strict=True))
+    assert seen_env == dict(zip(embodiment_vars, ("29dof", "rubber_hand", "none"), strict=True))
 
 
 def _attach_fake_sim(robot, pressed: set[int], band_enabled: bool = False, num_buttons: int = 13):

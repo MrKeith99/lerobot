@@ -51,13 +51,12 @@ _DEFAULT_KP, _DEFAULT_KD = _build_gains()
 @RobotConfig.register_subclass("unitree_g1")
 @dataclass
 class UnitreeG1Config(RobotConfig):
-    # Embodiment, mirroring the MuJoCo sim's BODY / END_EFFECTOR / HEAD options:
+    # Embodiment, mirroring the MuJoCo sim's BODY / END_EFFECTOR / HEAD options; any combination:
     # body "29dof" or "23dof" (no waist roll/pitch, no wrist pitch/yaw);
-    # end_effector "none", "dex1" (gripper), "dex3" (hand) or "amazing_hand";
-    # head "none" or "d455_pan_tilt" (Dynamixel pan/tilt RealSense D455).
-    # dex1/dex3 need the 29dof body; amazing_hand needs the 23dof body and the d455_pan_tilt head.
+    # end_effector "rubber_hand" (stock passive hand), "none" (bare wrist), "dex1" (gripper),
+    # "dex3" (hand) or "amazing_hand"; head "none" or "d455_pan_tilt" (Dynamixel pan/tilt D455).
     body: str = "29dof"
-    end_effector: str = "none"
+    end_effector: str = "rubber_hand"
     head: str = "none"
 
     # 23dof only: hardware revision, checked against the robot's reported mode_machine.
@@ -133,12 +132,6 @@ class UnitreeG1Config(RobotConfig):
         ):
             if value not in choices:
                 raise ValueError(f"{name} must be one of {choices}, got {value!r}")
-        if self.end_effector in ("dex1", "dex3") and self.body != "29dof":
-            raise ValueError(f"end_effector={self.end_effector!r} requires body='29dof'")
-        if self.end_effector == "amazing_hand" and self.body != "23dof":
-            raise ValueError("end_effector='amazing_hand' requires body='23dof'")
-        if (self.end_effector == "amazing_hand") != (self.head == "d455_pan_tilt"):
-            raise ValueError("end_effector='amazing_hand' and head='d455_pan_tilt' require each other")
 
         if not (len(self.kp) == len(self.kd) == len(self.default_positions) == 29):
             raise ValueError("kp, kd and default_positions must all have length 29")
@@ -167,9 +160,13 @@ class UnitreeG1Config(RobotConfig):
     @property
     def robot_type(self) -> str:
         """Embodiment name, used as the dataset `robot_type` and calibration id, e.g.
-        `unitree_g1_23dof_amazing_hand_d455_pan_tilt`."""
+        `unitree_g1_23dof_amazing_hand_d455_pan_tilt`. The stock rubber hand and fixed head are
+        left out; a bare wrist is `no_hand`."""
         parts = ["unitree_g1", self.body]
-        parts += [p for p in (self.end_effector, self.head) if p != "none"]
+        if self.end_effector != "rubber_hand":
+            parts.append("no_hand" if self.end_effector == "none" else self.end_effector)
+        if self.head != "none":
+            parts.append(self.head)
         return "_".join(parts)
 
     @property

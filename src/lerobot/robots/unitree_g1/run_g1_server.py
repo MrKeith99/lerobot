@@ -261,6 +261,8 @@ def main() -> None:
     parser.add_argument(
         "--headhand", action="store_true", help="Also run the pan/tilt head + AmazingHand bridge"
     )
+    parser.add_argument("--no-head", action="store_true", help="Head/hand bridge without the head bus")
+    parser.add_argument("--no-hands", action="store_true", help="Head/hand bridge without the hand bus")
     parser.add_argument("--head-port", default=DEFAULT_HEAD_PORT)
     parser.add_argument("--hand-port", default=DEFAULT_HAND_PORT)
     parser.add_argument("--headhand-rate", type=float, default=50.0)
@@ -270,6 +272,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.camera and args.camera_type == "intelrealsense" and not args.camera_serial:
         parser.error("--camera-serial is required with --camera-type intelrealsense")
+    if args.headhand and args.no_head and args.no_hands:
+        parser.error("--headhand needs the head bus, the hand bus or both")
 
     # Optionally start camera server in background thread
     camera_thread = None
@@ -344,7 +348,9 @@ def main() -> None:
     headhand_server = None
     t_headhand = None
     if args.headhand:
-        device = HeadHandDevice(args.head_port, args.hand_port)
+        device = HeadHandDevice(
+            None if args.no_head else args.head_port, None if args.no_hands else args.hand_port
+        )
         device.connect(handshake=not args.no_handshake)
         device.configure()
         headhand_server = HeadHandServer(

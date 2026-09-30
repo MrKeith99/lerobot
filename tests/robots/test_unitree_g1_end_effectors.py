@@ -153,7 +153,7 @@ def test_all_hand_keys_have_no_duplicates():
 
 
 def test_hand_specs_registry():
-    assert set(ee.HAND_SPECS) == set(ee.END_EFFECTORS) - {"none"}
+    assert set(ee.HAND_SPECS) == set(ee.END_EFFECTORS) - {"rubber_hand", "none"}
     for name, spec in ee.HAND_SPECS.items():
         assert spec.name == name
         for side in ee.HAND_SIDES:

@@ -40,10 +40,16 @@ from lerobot.utils.feature_utils import build_dataset_frame, hw_to_dataset_featu
 AH_EMBODIMENT = {"body": "23dof", "end_effector": "amazing_hand", "head": "d455_pan_tilt"}
 
 VALID_EMBODIMENTS = [
-    ({"body": "29dof", "end_effector": "none", "head": "none"}, "unitree_g1_29dof"),
-    ({"body": "23dof", "end_effector": "none", "head": "none"}, "unitree_g1_23dof"),
+    ({"body": "29dof", "end_effector": "rubber_hand", "head": "none"}, "unitree_g1_29dof"),
+    ({"body": "23dof", "end_effector": "rubber_hand", "head": "none"}, "unitree_g1_23dof"),
+    ({"body": "29dof", "end_effector": "none", "head": "none"}, "unitree_g1_29dof_no_hand"),
     ({"body": "29dof", "end_effector": "dex1", "head": "none"}, "unitree_g1_29dof_dex1"),
-    ({"body": "29dof", "end_effector": "dex3", "head": "none"}, "unitree_g1_29dof_dex3"),
+    ({"body": "23dof", "end_effector": "dex3", "head": "none"}, "unitree_g1_23dof_dex3"),
+    ({"body": "29dof", "end_effector": "amazing_hand", "head": "none"}, "unitree_g1_29dof_amazing_hand"),
+    (
+        {"body": "29dof", "end_effector": "rubber_hand", "head": "d455_pan_tilt"},
+        "unitree_g1_29dof_d455_pan_tilt",
+    ),
     (AH_EMBODIMENT, "unitree_g1_23dof_amazing_hand_d455_pan_tilt"),
 ]
 
@@ -71,7 +77,7 @@ def _robot(controller=None, **config_kwargs):
 class TestEmbodimentConfigDefaults:
     def test_defaults(self):
         cfg = UnitreeG1Config()
-        assert (cfg.body, cfg.end_effector, cfg.head) == ("29dof", "none", "none")
+        assert (cfg.body, cfg.end_effector, cfg.head) == ("29dof", "rubber_hand", "none")
         assert cfg.revision == "rev_1_0"
         assert cfg.is_simulation is True
         assert cfg.headhand_state_port == HEADHAND_STATE_PORT
@@ -110,27 +116,26 @@ class TestEmbodimentConfigDefaults:
         assert len(_ah_config().headhand_motors) == 18
         assert UnitreeG1Config().headhand_motors == {}
         assert UnitreeG1Config(end_effector="dex3").headhand_motors == {}
+        assert set(UnitreeG1Config(head="d455_pan_tilt").headhand_motors) == {"kHeadYaw", "kHeadPitch"}
+        assert len(UnitreeG1Config(end_effector="amazing_hand").headhand_motors) == 16
 
 
 class TestEmbodimentValidation:
+    @pytest.mark.parametrize("body", ["29dof", "23dof"])
+    @pytest.mark.parametrize("end_effector", ["rubber_hand", "none", "dex1", "dex3", "amazing_hand"])
+    @pytest.mark.parametrize("head", ["none", "d455_pan_tilt"])
+    def test_every_combination_is_valid(self, body, end_effector, head):
+        UnitreeG1Config(body=body, end_effector=end_effector, head=head)
+
     @pytest.mark.parametrize(
         "embodiment, match",
         [
-            ({"body": "23dof", "end_effector": "dex1"}, "requires body='29dof'"),
-            ({"body": "23dof", "end_effector": "dex3"}, "requires body='29dof'"),
-            (
-                {"body": "29dof", "end_effector": "amazing_hand", "head": "d455_pan_tilt"},
-                "requires body='23dof'",
-            ),
-            ({"body": "23dof", "end_effector": "amazing_hand", "head": "none"}, "require each other"),
-            ({"body": "23dof", "end_effector": "none", "head": "d455_pan_tilt"}, "require each other"),
-            ({"body": "29dof", "end_effector": "dex3", "head": "d455_pan_tilt"}, "require each other"),
             ({"body": "31dof"}, "body"),
             ({"end_effector": "gripper"}, "end_effector"),
             ({"head": "fixed"}, "head"),
         ],
     )
-    def test_invalid_combos_raise(self, embodiment, match):
+    def test_invalid_values_raise(self, embodiment, match):
         with pytest.raises(ValueError, match=match):
             UnitreeG1Config(**embodiment)
 

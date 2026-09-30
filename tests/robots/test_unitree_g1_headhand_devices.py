@@ -195,3 +195,32 @@ def test_set_torque_enables_and_disables_both_buses(device, head_bus_mock, hand_
     device.set_torque(False)
     head_bus_mock.disable_torque.assert_called_once()
     hand_bus_mock.disable_torque.assert_called_once()
+
+
+def test_head_only_device_serves_the_head_motors(head_bus_mock):
+    head_bus_mock.sync_read.return_value = {"kHeadYaw": 2000, "kHeadPitch": 2100}
+    dev = d.HeadHandDevice("/dev/head", None, head_bus_cls=lambda **kwargs: head_bus_mock)
+    assert dev.hand_bus is None
+    assert set(dev.models) == set(d.HEAD_MOTORS)
+    dev.connect()
+    assert dev.read_ticks() == {"kHeadYaw": 2000, "kHeadPitch": 2100}
+    dev.write_ticks({"kHeadYaw": 2050, "kRightHandMotor1": 500})
+    head_bus_mock.sync_write.assert_called_once_with("Goal_Position", {"kHeadYaw": 2050}, normalize=False)
+    assert set(dev.ping_all()) == set(d.HEAD_MOTORS)
+
+
+def test_hands_only_device_serves_the_hand_motors(hand_bus_mock):
+    hand_bus_mock.read.return_value = 512
+    dev = d.HeadHandDevice(None, "/dev/hand", hand_bus_cls=lambda **kwargs: hand_bus_mock)
+    assert dev.head_bus is None
+    dev.connect()
+    assert set(dev.read_ticks()) == set(d.HAND_MOTORS)
+    dev.set_torque(False)
+    hand_bus_mock.disable_torque.assert_called_once()
+    dev.write_ticks({"kHeadYaw": 2050})
+    hand_bus_mock.sync_write.assert_not_called()
+
+
+def test_device_needs_a_bus():
+    with pytest.raises(ValueError):
+        d.HeadHandDevice(None, None)

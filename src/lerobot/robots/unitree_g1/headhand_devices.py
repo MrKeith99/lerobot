@@ -109,77 +109,94 @@ def build_hand_motors() -> dict[str, Motor]:
 
 
 class HeadHandDevice:
-    """Owns the Dynamixel head bus and the Feetech AmazingHand bus."""
+    """Owns the Dynamixel head bus and/or the Feetech AmazingHand bus; a `None` port skips that bus."""
 
     def __init__(
         self,
-        head_port: str,
-        hand_port: str,
+        head_port: str | None,
+        hand_port: str | None,
         *,
         head_bus_cls=None,
         hand_bus_cls=None,
     ) -> None:
-        if head_bus_cls is None:
+        if head_port is None and hand_port is None:
+            raise ValueError("HeadHandDevice needs a head port, a hand port or both")
+        if head_bus_cls is None and head_port is not None:
             from lerobot.motors.dynamixel.dynamixel import DynamixelMotorsBus
 
             head_bus_cls = DynamixelMotorsBus
-        if hand_bus_cls is None:
+        if hand_bus_cls is None and hand_port is not None:
             from lerobot.motors.feetech.feetech import FeetechMotorsBus
 
             hand_bus_cls = FeetechMotorsBus
 
-        self.head_bus = head_bus_cls(port=head_port, motors=build_head_motors())
-        self.hand_bus = hand_bus_cls(port=hand_port, motors=build_hand_motors(), protocol_version=1)
-        self.models: dict[str, str] = {name: model for name, (_, model) in HEAD_HAND_MOTORS.items()}
+        self.head_bus = (
+            None if head_port is None else head_bus_cls(port=head_port, motors=build_head_motors())
+        )
+        self.hand_bus = (
+            None
+            if hand_port is None
+            else hand_bus_cls(port=hand_port, motors=build_hand_motors(), protocol_version=1)
+        )
+        motors = {**(HEAD_MOTORS if self.head_bus else {}), **(HAND_MOTORS if self.hand_bus else {})}
+        self.models: dict[str, str] = {name: model for name, (_, model) in motors.items()}
         self._lock = threading.Lock()
+
+    @property
+    def _buses(self) -> list:
+        return [bus for bus in (self.head_bus, self.hand_bus) if bus is not None]
 
     def connect(self, handshake: bool = True) -> None:
         with self._lock:
-            self.head_bus.connect(handshake=handshake)
-            self.hand_bus.connect(handshake=handshake)
+            for bus in self._buses:
+                bus.connect(handshake=handshake)
 
     def disconnect(self, disable_torque: bool = False) -> None:
         with self._lock:
-            self.head_bus.disconnect(disable_torque=disable_torque)
-            self.hand_bus.disconnect(disable_torque=disable_torque)
+            for bus in self._buses:
+                bus.disconnect(disable_torque=disable_torque)
 
     def configure(self) -> None:
         with self._lock:
-            with self.head_bus.torque_disabled():
-                for name in HEAD_MOTORS:
-                    self.head_bus.write("Operating_Mode", name, 3, normalize=False)
-            self.head_bus.configure_motors()
-            self.hand_bus.configure_motors()
+            if self.head_bus is not None:
+                with self.head_bus.torque_disabled():
+                    for name in HEAD_MOTORS:
+                        self.head_bus.write("Operating_Mode", name, 3, normalize=False)
+            for bus in self._buses:
+                bus.configure_motors()
 
     def set_torque(self, enabled: bool) -> None:
         with self._lock:
-            if enabled:
-                self.head_bus.enable_torque()
-                self.hand_bus.enable_torque()
-            else:
-                self.head_bus.disable_torque()
-                self.hand_bus.disable_torque()
+            for bus in self._buses:
+                if enabled:
+                    bus.enable_torque()
+                else:
+                    bus.disable_torque()
 
     def read_ticks(self) -> dict[str, int]:
         with self._lock:
-            ticks: dict[str, int] = {
-                name: int(value)
-                for name, value in self.head_bus.sync_read("Present_Position", normalize=False).items()
-            }
-            for name in HAND_MOTORS:
-                ticks[name] = int(self.hand_bus.read("Present_Position", name, normalize=False, num_retry=1))
+            ticks: dict[str, int] = {}
+            if self.head_bus is not None:
+                positions = self.head_bus.sync_read("Present_Position", normalize=False)
+                ticks.update((name, int(value)) for name, value in positions.items())
+            if self.hand_bus is not None:
+                for name in HAND_MOTORS:
+                    ticks[name] = int(
+                        self.hand_bus.read("Present_Position", name, normalize=False, num_retry=1)
+                    )
             return ticks
 
     def write_ticks(self, goals: Mapping[str, int]) -> None:
         head_goals: dict[str, int] = {}
         hand_goals: dict[str, int] = {}
         for name, tick in goals.items():
-            model = self.models[name]
-            tick_min, tick_max = TICK_RANGE[model]
+            if name not in self.models:
+                continue
+            tick_min, tick_max = TICK_RANGE[self.models[name]]
             clamped = min(tick_max, max(tick_min, int(tick)))
             if name in HEAD_MOTORS:
                 head_goals[name] = clamped
-            elif name in HAND_MOTORS:
+            else:
                 hand_goals[name] = clamped
 
         with self._lock:
@@ -191,21 +208,19 @@ class HeadHandDevice:
     def ping_all(self) -> dict[str, int | None]:
         results: dict[str, int | None] = {}
         with self._lock:
-            for name in HEAD_MOTORS:
-                try:
-                    results[name] = self.head_bus.ping(name)
-                except Exception:
-                    results[name] = None
-            for name in HAND_MOTORS:
-                try:
-                    results[name] = self.hand_bus.ping(name)
-                except Exception:
-                    results[name] = None
+            for bus, motors in ((self.head_bus, HEAD_MOTORS), (self.hand_bus, HAND_MOTORS)):
+                if bus is None:
+                    continue
+                for name in motors:
+                    try:
+                        results[name] = bus.ping(name)
+                    except Exception:
+                        results[name] = None
         return results
 
     @property
     def is_connected(self) -> bool:
-        return bool(self.head_bus.is_connected and self.hand_bus.is_connected)
+        return all(bus.is_connected for bus in self._buses)
 
 
 def _cli() -> None:
@@ -213,11 +228,15 @@ def _cli() -> None:
     parser.add_argument("command", choices=["scan", "read", "torque-off"])
     parser.add_argument("--head-port", default=DEFAULT_HEAD_PORT)
     parser.add_argument("--hand-port", default=DEFAULT_HAND_PORT)
+    parser.add_argument("--no-head", action="store_true", help="Skip the head bus")
+    parser.add_argument("--no-hands", action="store_true", help="Skip the hand bus")
     parser.add_argument("--no-handshake", action="store_true")
     parser.add_argument("--loop", action="store_true")
     args = parser.parse_args()
 
-    device = HeadHandDevice(args.head_port, args.hand_port)
+    device = HeadHandDevice(
+        None if args.no_head else args.head_port, None if args.no_hands else args.hand_port
+    )
     device.connect(handshake=not args.no_handshake)
     try:
         if args.command == "scan":

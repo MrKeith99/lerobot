@@ -16,6 +16,8 @@
 
 """End effector variants for the Unitree G1: joint keys, open/closed poses and the closure mapping.
 
+- `rubber_hand`: Unitree's stock passive hand (no joints).
+- `none`: bare wrist (no joints).
 - `dex1`: Unitree Dex1-1 parallel gripper, one position per side, over DDS.
 - `dex3`: Unitree Dex3-1 hand, 7 joints per side, over DDS.
 - `amazing_hand`: Pollen Robotics AmazingHand, 8 Feetech SCS0009 servos per side, over the head/hand
@@ -31,7 +33,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-END_EFFECTORS: tuple[str, ...] = ("none", "dex1", "dex3", "amazing_hand")
+END_EFFECTORS: tuple[str, ...] = ("rubber_hand", "none", "dex1", "dex3", "amazing_hand")
 HAND_SIDES: tuple[str, ...] = ("left", "right")
 # "closure": one value per hand in [0, 1]; "per_motor": every hand joint/servo.
 HAND_REPRESENTATIONS: tuple[str, ...] = ("closure", "per_motor")
