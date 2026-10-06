@@ -156,6 +156,7 @@ from lerobot.teleoperators import (  # noqa: F401
     unitree_g1_xr,
 )
 from lerobot.teleoperators.keyboard import KeyboardTeleop
+from lerobot.teleoperators.utils import TeleopEvents
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
 from lerobot.utils.import_utils import register_third_party_plugins
@@ -229,6 +230,21 @@ class RecordConfig:
                                V
                   ( Rerun Log / Loop Wait )
 """
+
+
+def apply_teleop_events(teleop, events: dict) -> None:
+    """Map the teleoperator's success / re-record events onto the keyboard flags (-> / <-)."""
+    get_teleop_events = getattr(teleop, "get_teleop_events", None)
+    if not callable(get_teleop_events):
+        return
+    teleop_events = get_teleop_events()
+    if teleop_events.get(TeleopEvents.RERECORD_EPISODE):
+        logging.info("Teleop: re-record episode")
+        events["rerecord_episode"] = True
+        events["exit_early"] = True
+    if teleop_events.get(TeleopEvents.SUCCESS):
+        logging.info("Teleop: end episode")
+        events["exit_early"] = True
 
 
 @safe_stop_image_writer
@@ -307,6 +323,7 @@ def record_loop(
             if isinstance(robot, UnitreeG1):
                 teleop.send_feedback({**obs, ROBOT_TYPE_FEEDBACK_KEY: robot.name})
             act = teleop.get_action()
+            apply_teleop_events(teleop, events)
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor
             act_processed_teleop = teleop_action_processor((act, obs))

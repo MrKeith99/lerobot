@@ -526,7 +526,8 @@ the robot's forward direction and press A.
 | Triggers                     | Left / right hand closure                                                                        |
 | Left stick, right x          | Walk / turn: `kNavVx/Vy/YawRate.cmd`                                                             |
 | X / Y                        | Hold to lower / raise `kBaseHeight.cmd`                                                          |
-| Right / left stick click     | End episode: success / rerecord                                                                  |
+| Right stick click            | End the episode (success); during the reset phase, skip the rest of it                           |
+| Left stick click             | Discard and re-record the episode                                                                |
 | Both grips, 1 s (disengaged) | Sim only: attach / release the elastic band (ignored with `--robot.sim_band_toggle_button=null`) |
 
 With `lerobot-record`, each episode starts only once the operator is ready: in sim the elastic band is
