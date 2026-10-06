@@ -43,6 +43,7 @@ from .g1_utils import (
     MODE_MACHINE_BY_REVISION,
     NAV_KEYS,
     REMOTE_KEYS,
+    SIM_BAND_TOGGLE_KEY,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
     default_remote_input,
@@ -219,6 +220,8 @@ class UnitreeG1(Robot):
         self.controller_input = default_remote_input()
         self.controller_output = {}
         self._band_button_was_pressed = False
+        self._band_toggle_requested = False
+        self._band_toggle_was_requested = False
         self._reset_button_was_pressed = False
         self._band_was_attached = False
 
@@ -246,12 +249,31 @@ class UnitreeG1(Robot):
                     motor_cmd.kd = 0.0
                     motor_cmd.tau = 0.0
 
+    @staticmethod
+    def _toggle_sim_band(band) -> None:
+        band.enable = not band.enable
+        logger.info(f"Elastic band {'attached' if band.enable else 'released'}")
+
+    def _request_sim_band_toggle(self, action: RobotAction) -> None:
+        requested = float(action.get(SIM_BAND_TOGGLE_KEY, 0.0)) > 0.5
+        enabled = self.config.is_simulation and self.config.sim_band_toggle_button is not None
+        if requested and not self._band_toggle_was_requested and enabled:
+            self._band_toggle_requested = True
+        self._band_toggle_was_requested = requested
+
     def _poll_sim_gamepad_buttons(self):
         """Sim-only gamepad shortcuts: toggle the elastic band (same as "9" in the MuJoCo viewer) and reset."""
         sim = getattr(getattr(self.sim_env, "simulator", None), "sim_env", None)
         joystick = getattr(getattr(sim, "unitree_bridge", None), "joystick", None)
         band = getattr(sim, "elastic_band", None)
-        if joystick is None or band is None:
+        toggle_requested, self._band_toggle_requested = self._band_toggle_requested, False
+        if band is None:
+            return
+
+        if toggle_requested:
+            self._toggle_sim_band(band)
+
+        if joystick is None:
             return
 
         def just_pressed(button: int | None, was_pressed_attr: str) -> bool:
@@ -263,8 +285,7 @@ class UnitreeG1(Robot):
             return pressed and not was_pressed
 
         if just_pressed(self.config.sim_band_toggle_button, "_band_button_was_pressed"):
-            band.enable = not band.enable
-            logger.info(f"Elastic band {'attached' if band.enable else 'released'}")
+            self._toggle_sim_band(band)
 
         if just_pressed(self.config.sim_reset_button, "_reset_button_was_pressed"):
             # Runs on the sim-stepping thread, so MuJoCo state is never modified mid-step
@@ -724,6 +745,8 @@ class UnitreeG1(Robot):
         """Command the body, head and hand from one action. Hand closures are expanded to joint targets;
         returns the action with the head/hand targets as sent (clamped)."""
         action = dict(action)
+        self._request_sim_band_toggle(action)
+        action.pop(SIM_BAND_TOGGLE_KEY, None)
         sent: dict[str, float] = {}
 
         hand_targets: dict[str, float] = {}

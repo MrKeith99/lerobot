@@ -517,16 +517,17 @@ lerobot-teleoperate \
 Open `https://<host>:8012` in the Quest browser (accept the certificate), enter VR, then stand facing
 the robot's forward direction and press A.
 
-| Quest controllers        | Action                                                                            |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| A                        | Engage / disengage: recenter on your facing direction, start from the arm pose    |
-| B                        | Stop: hold every target and stop walking until A re-engages                       |
-| Controller poses         | Arm IK targets (`--teleop.max_arm_speed_rad_s`, default 3.0)                      |
-| Headset yaw / pitch      | `kHeadYaw.q` / `kHeadPitch.q` with a pan/tilt head (`--teleop.invert_head_pitch`) |
-| Triggers                 | Left / right hand closure                                                         |
-| Left stick, right x      | Walk / turn: `kNavVx/Vy/YawRate.cmd`                                              |
-| X / Y                    | Hold to lower / raise `kBaseHeight.cmd`                                           |
-| Right / left stick click | End episode: success / rerecord                                                   |
+| Quest controllers            | Action                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| A                            | Engage / disengage: recenter on your facing direction, start from the arm pose                   |
+| B                            | Stop: hold every target and stop walking until A re-engages                                      |
+| Controller poses             | Arm IK targets (`--teleop.max_arm_speed_rad_s`, default 3.0)                                     |
+| Headset yaw / pitch          | `kHeadYaw.q` / `kHeadPitch.q` with a pan/tilt head (`--teleop.invert_head_pitch`)                |
+| Triggers                     | Left / right hand closure                                                                        |
+| Left stick, right x          | Walk / turn: `kNavVx/Vy/YawRate.cmd`                                                             |
+| X / Y                        | Hold to lower / raise `kBaseHeight.cmd`                                                          |
+| Right / left stick click     | End episode: success / rerecord                                                                  |
+| Both grips, 1 s (disengaged) | Sim only: attach / release the elastic band (ignored with `--robot.sim_band_toggle_button=null`) |
 
 Nothing moves until A; the arms then move to your pose at `--teleop.engage_arm_speed_rad_s` (0.5) before following at full speed, and targets hold while tracking is lost. `--teleop.input_mode=hand` uses hand
 tracking (pinch closes the hand; it engages when tracking starts).

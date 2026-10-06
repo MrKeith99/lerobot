@@ -34,6 +34,7 @@ from lerobot.robots.unitree_g1.g1_utils import (
     REMOTE_AXES,
     REMOTE_BUTTONS,
     REMOTE_KEYS,
+    SIM_BAND_TOGGLE_KEY,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
     default_remote_input,
@@ -427,3 +428,69 @@ def test_sim_reset_button_reattaches_band_and_limps_legs(unitree_g1):
         assert bridge.low_cmd.motor_cmd[motor].kd == 0.0
     assert robot.msg.motor_cmd[15].kp != 0.0  # arms untouched
     assert bridge.low_cmd.motor_cmd[15].kp != 0.0
+
+
+def _band_action(value: float | None) -> dict[str, float]:
+    return {} if value is None else {SIM_BAND_TOGGLE_KEY: value}
+
+
+def test_sim_band_toggle_key_rising_edge_works_without_joystick(unitree_g1):
+    robot, _ = unitree_g1
+    band, bridge = _attach_fake_sim(robot, set(), band_enabled=True)
+    bridge.joystick = None
+
+    robot._request_sim_band_toggle(_band_action(0.0))
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is True
+
+    robot._request_sim_band_toggle(_band_action(1.0))
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is False
+
+    robot._request_sim_band_toggle(_band_action(0.0))
+    robot._request_sim_band_toggle(_band_action(1.0))
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is True
+
+
+def test_sim_band_toggle_key_does_not_repeat_while_held(unitree_g1):
+    robot, _ = unitree_g1
+    band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
+
+    for _ in range(3):
+        robot._request_sim_band_toggle(_band_action(1.0))
+        robot._poll_sim_gamepad_buttons()
+    assert band.enable is False
+
+    robot._request_sim_band_toggle(_band_action(None))
+    robot._request_sim_band_toggle(_band_action(1.0))
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is True
+
+
+def test_sim_band_toggle_key_ignored_without_toggle_button():
+    with _mocked_unitree_g1(sim_band_toggle_button=None) as (robot, _):
+        band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
+        robot._request_sim_band_toggle(_band_action(1.0))
+        robot._poll_sim_gamepad_buttons()
+        assert band.enable is True
+
+
+def test_sim_band_toggle_key_ignored_on_real_robot(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.is_simulation = False
+    band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
+    robot._request_sim_band_toggle(_band_action(1.0))
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is True
+
+
+def test_send_action_consumes_band_toggle_key_and_does_not_forward_it(unitree_g1):
+    robot, _ = unitree_g1
+    band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
+    robot.publish_lowcmd = MagicMock()
+    sent = robot.send_action({SIM_BAND_TOGGLE_KEY: 1.0})
+    assert SIM_BAND_TOGGLE_KEY not in sent
+    assert SIM_BAND_TOGGLE_KEY not in robot.action_features
+    robot._poll_sim_gamepad_buttons()
+    assert band.enable is False

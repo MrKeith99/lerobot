@@ -29,6 +29,7 @@ from lerobot.robots.unitree_g1.g1_utils import (  # noqa: E402
     BODY_KEYS,
     GROOT_BASE_HEIGHT_DEFAULT,
     ROBOT_TYPE_FEEDBACK_KEY,
+    SIM_BAND_TOGGLE_KEY,
 )
 from lerobot.robots.unitree_g1.heads import HEAD_KEYS  # noqa: E402
 from lerobot.teleoperators.unitree_g1_xr import (  # noqa: E402
@@ -354,3 +355,73 @@ def test_arms_approach_the_operator_slowly_after_engaging(clock):
     teleop.arm_ik.solution[:] = 0.0
     before = step(teleop, clock)["kLeftElbow.q"]
     assert before - step(teleop, clock)["kLeftElbow.q"] == pytest.approx(3.0 * DT)
+
+
+GRIPS = {"left_grip": True, "right_grip": True}
+
+
+def grips_frame(**buttons):
+    return XRFrame(tracking=True, buttons={**GRIPS, **buttons})
+
+
+def toggles(teleop, clock, frame, n):
+    return [step(teleop, clock, frame)[SIM_BAND_TOGGLE_KEY] for _ in range(n)]
+
+
+def test_band_toggle_key_is_a_zero_action_feature(clock):
+    teleop = make_teleop(clock)
+    assert SIM_BAND_TOGGLE_KEY in teleop.action_features
+    assert step(teleop, clock, XRFrame())[SIM_BAND_TOGGLE_KEY] == 0.0
+    assert step(teleop, clock, XRFrame(buttons={"left_grip": True}))[SIM_BAND_TOGGLE_KEY] == 0.0
+
+
+def test_band_toggle_hold_must_be_positive():
+    with pytest.raises(ValueError, match="band_toggle_hold_s"):
+        UnitreeG1XRTeleopConfig(band_toggle_hold_s=0.0)
+
+
+def test_both_grips_fire_once_after_the_hold_time(clock):
+    teleop = make_teleop(clock)
+    values = toggles(teleop, clock, grips_frame(), 80)
+    assert values[:49] == [0.0] * 49
+    assert values.count(1.0) == 1
+    assert values.index(1.0) in (49, 50)
+
+
+def test_band_toggle_does_not_fire_before_the_hold_time(clock):
+    teleop = make_teleop(clock, band_toggle_hold_s=2.0)
+    assert toggles(teleop, clock, grips_frame(), 90) == [0.0] * 90
+
+
+def test_band_toggle_needs_both_grips_continuously(clock):
+    teleop = make_teleop(clock)
+    assert toggles(teleop, clock, grips_frame(), 40) == [0.0] * 40
+    step(teleop, clock, XRFrame(tracking=True, buttons={"left_grip": True}))
+    assert toggles(teleop, clock, grips_frame(), 40) == [0.0] * 40
+
+
+def test_band_toggle_never_fires_while_engaged(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    assert teleop.engaged
+    assert toggles(teleop, clock, grips_frame(), 100) == [0.0] * 100
+
+
+def test_engaging_cancels_a_hold_in_progress(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    assert toggles(teleop, clock, grips_frame(), 40) == [0.0] * 40
+    assert toggles(teleop, clock, grips_frame(a=True), 1) == [0.0]
+    assert teleop.engaged
+    assert toggles(teleop, clock, grips_frame(), 100) == [0.0] * 100
+    step(teleop, clock, grips_frame(a=True))
+    assert not teleop.engaged
+    assert toggles(teleop, clock, grips_frame(), 40) == [0.0] * 40
+
+
+def test_band_toggle_rearms_after_release(clock):
+    teleop = make_teleop(clock)
+    assert toggles(teleop, clock, grips_frame(), 100).count(1.0) == 1
+    step(teleop, clock, XRFrame(tracking=True))
+    assert toggles(teleop, clock, grips_frame(), 100).count(1.0) == 1

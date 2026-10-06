@@ -39,6 +39,8 @@ GROOT_BASE_HEIGHT_RATE = 0.05  # m/s
 # Absolute navigation command (vx, vy, yaw rate) consumed by the locomotion controllers, recorded as
 # an action in controller mode. Derived from the remote sticks as (ly, -lx, -rx).
 NAV_KEYS = ("kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd")
+# Teleop request (1.0 for one action) to toggle the sim's elastic band; never recorded.
+SIM_BAND_TOGGLE_KEY = "sim.band_toggle"
 # Feedback entry the record/teleoperate scripts add to a G1 observation for the teleoperator: the robot's
 # `robot_type`, e.g. for an XR teleop to refuse a robot of another embodiment.
 ROBOT_TYPE_FEEDBACK_KEY = "robot_type"

@@ -60,8 +60,12 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     hand_blend_per_s: float = 4.0
     invert_head_pitch: bool = False
     stick_deadzone: float = 0.1
+    # Both grips held this long while disengaged toggle the sim elastic band.
+    band_toggle_hold_s: float = 1.0
 
     def __post_init__(self) -> None:
+        if self.band_toggle_hold_s <= 0:
+            raise ValueError(f"band_toggle_hold_s must be > 0, got {self.band_toggle_hold_s}")
         for name, value, allowed in (
             ("body", self.body, BODIES),
             ("end_effector", self.end_effector, END_EFFECTORS),

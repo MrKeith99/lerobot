@@ -53,6 +53,7 @@ from lerobot.robots.unitree_g1.g1_utils import (
     REMOTE_BUTTONS,
     REMOTE_KEYS,
     ROBOT_TYPE_FEEDBACK_KEY,
+    SIM_BAND_TOGGLE_KEY,
     nav_from_remote,
 )
 from lerobot.robots.unitree_g1.heads import DEFAULT_HEAD_Q, HEAD_KEYS, HEAD_LIMITS_RAD
@@ -118,13 +119,15 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._buttons: dict[str, bool] = {}
         self._pending_events: set[str] = set()
         self._last_t: float | None = None
+        self._grips_held_s = 0.0
+        self._band_toggle_fired = False
 
     @cached_property
     def action_features(self) -> dict[str, type]:
         keys = BODY_KEYS + (HEAD_KEYS if self._head else ())
         if self.hand_spec is not None:
             keys += HAND_CLOSURE_KEYS + self.hand_spec.joint_keys()
-        return dict.fromkeys(keys + REMOTE_KEYS + NAV_KEYS + (BASE_HEIGHT_KEY,), float)
+        return dict.fromkeys(keys + REMOTE_KEYS + NAV_KEYS + (BASE_HEIGHT_KEY, SIM_BAND_TOGGLE_KEY), float)
 
     @property
     def feedback_features(self) -> dict[str, type]:
@@ -171,6 +174,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         print("  A: engage / disengage (face the robot's forward direction first)   B: stop")
         print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
         print("  Right / left stick click: end episode success / rerecord")
+        print(f"  Both grips {cfg.band_toggle_hold_s:g} s (disengaged): sim elastic band")
         if cfg.display_mode == "pass-through":
             print("  Headset shows pass-through (--teleop.display_mode=ego|immersive for the head camera)")
         else:
@@ -299,6 +303,19 @@ class UnitreeG1XRTeleop(Teleoperator):
     def _stick(self, value: float) -> float:
         return 0.0 if abs(value) < self.config.stick_deadzone else _clip(value, -1.0, 1.0)
 
+    def _band_toggle(self, frame: Any, dt: float) -> float:
+        both = frame.buttons.get("left_grip", False) and frame.buttons.get("right_grip", False)
+        if self._engaged or not both:
+            self._grips_held_s = 0.0
+            self._band_toggle_fired = False
+            return 0.0
+        self._grips_held_s += dt
+        if self._band_toggle_fired or self._grips_held_s < self.config.band_toggle_hold_s:
+            return 0.0
+        self._band_toggle_fired = True
+        logger.info("XR teleop: both grips held, toggling the sim elastic band")
+        return 1.0
+
     @check_if_not_connected
     def get_action(self) -> RobotAction:
         now = time.perf_counter()
@@ -353,11 +370,13 @@ class UnitreeG1XRTeleop(Teleoperator):
         buttons[_WAIST_RAISE_KEY] = float(raise_)
         buttons[_WAIST_LOWER_KEY] = float(lower)
         nav = nav_from_remote(axes["remote.lx"], axes["remote.ly"], axes["remote.rx"])
+        band_toggle = {SIM_BAND_TOGGLE_KEY: self._band_toggle(frame, dt)}
         return (
             {key: self._target[key] for key in self.action_features if key in self._target}
             | axes
             | nav
             | buttons
+            | band_toggle
         )
 
     def get_teleop_events(self) -> dict[str, Any]:
