@@ -638,6 +638,7 @@ class UnitreeG1(Robot):
             for name, value in (
                 ("WORLD", self.config.sim_world),
                 ("WORLD_RANDOMIZE", self.config.sim_world_randomize),
+                ("WORLD_GRASP", self.config.sim_world_grasp),
             ):
                 if value is not None:
                     embodiment[f"UNITREE_G1_MUJOCO_{name}"] = str(value)

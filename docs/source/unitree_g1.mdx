@@ -615,7 +615,10 @@ floor. `pick_cylinder` puts a table in front of the robot with an upright cylind
 tall, 0.35 m ahead of a standing robot's pelvis and 0.10 m to the right) and adds a fixed `table_view`
 camera to the sim's image stream, so record it next to `head_camera`. `--robot.sim_world_randomize=0.02`
 (`UNITREE_G1_MUJOCO_WORLD_RANDOMIZE`) jitters the cylinder by up to 2 cm in x and y, and by up to 15 degrees
-of yaw, at the start and at every sim reset; the default is no jitter.
+of yaw, at the start and at every sim reset; the default is no jitter. `--robot.sim_world_grasp`
+(`UNITREE_G1_MUJOCO_WORLD_GRASP`) is `attach` (the sim's default: an AmazingHand whose fingers 1-3 close past
+60 % with the cylinder between palm and fingertips holds it kinematically until it opens below 40 %) or
+`physics` (finger contacts only).
 
 ```bash
 lerobot-record \

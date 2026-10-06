@@ -89,6 +89,9 @@ class UnitreeG1Config(RobotConfig):
     # Simulation only: the sim's WORLD_RANDOMIZE, metres of uniform xy jitter (and +-15 deg yaw) of the
     # world's objects at start and on every sim reset. None keeps the sim's own default (0).
     sim_world_randomize: float | None = None
+    # Simulation only: the sim's WORLD_GRASP, "attach" (the object sticks to a hand that closes on it) or
+    # "physics" (finger contacts only). None keeps the sim's own default (attach).
+    sim_world_grasp: str | None = None
 
     # Socket config for ZMQ bridge
     robot_ip: str = "192.168.123.164"  # default G1 IP
@@ -152,6 +155,8 @@ class UnitreeG1Config(RobotConfig):
             raise ValueError("kp, kd and default_positions must all have length 29")
         if self.sim_world_randomize is not None and self.sim_world_randomize < 0:
             raise ValueError(f"sim_world_randomize must be >= 0, got {self.sim_world_randomize}")
+        if self.sim_world_grasp is not None and self.sim_world_grasp not in ("attach", "physics"):
+            raise ValueError(f"sim_world_grasp must be 'attach' or 'physics', got {self.sim_world_grasp!r}")
         if self.stand_ramp_s <= 0:
             raise ValueError(f"stand_ramp_s must be > 0, got {self.stand_ramp_s}")
         if self.head_default_positions is None:

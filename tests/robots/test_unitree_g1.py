@@ -132,6 +132,11 @@ class TestUnitreeG1Config:
         cfg = UnitreeG1Config()
         assert cfg.sim_world is None
         assert cfg.sim_world_randomize is None
+        assert cfg.sim_world_grasp is None
+
+    def test_unknown_sim_world_grasp_is_rejected(self):
+        with pytest.raises(ValueError, match="sim_world_grasp"):
+            UnitreeG1Config(sim_world_grasp="glue")
 
     def test_negative_sim_world_randomize_is_rejected(self):
         with pytest.raises(ValueError, match="sim_world_randomize"):
@@ -354,7 +359,7 @@ def _connect_and_capture_world_vars(robot):
     fake_inner_env = MagicMock()
     fake_inner_env.simulator = None
     fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
-    names = ("UNITREE_G1_MUJOCO_WORLD", "UNITREE_G1_MUJOCO_WORLD_RANDOMIZE")
+    names = ("UNITREE_G1_MUJOCO_WORLD", "UNITREE_G1_MUJOCO_WORLD_RANDOMIZE", "UNITREE_G1_MUJOCO_WORLD_GRASP")
     seen_env = {}
 
     def fake_make_env(*args, **kwargs):
@@ -370,8 +375,9 @@ def test_connect_exports_the_sim_world_when_set(unitree_g1):
     robot, _ = unitree_g1
     robot.config.sim_world = "pick_cylinder"
     robot.config.sim_world_randomize = 0.02
+    robot.config.sim_world_grasp = "physics"
     seen_env, names = _connect_and_capture_world_vars(robot)
-    assert seen_env == dict(zip(names, ("pick_cylinder", "0.02"), strict=True))
+    assert seen_env == dict(zip(names, ("pick_cylinder", "0.02", "physics"), strict=True))
     assert all(name not in os.environ for name in names)
 
 
@@ -379,7 +385,7 @@ def test_connect_exports_only_the_world_that_is_set(unitree_g1):
     robot, _ = unitree_g1
     robot.config.sim_world = "pick_cylinder"
     seen_env, names = _connect_and_capture_world_vars(robot)
-    assert seen_env == {names[0]: "pick_cylinder", names[1]: None}
+    assert seen_env == {names[0]: "pick_cylinder", names[1]: None, names[2]: None}
 
 
 def test_connect_does_not_export_the_world_when_unset(unitree_g1):
