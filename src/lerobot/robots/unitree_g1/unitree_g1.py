@@ -628,13 +628,19 @@ class UnitreeG1(Robot):
             from lerobot.envs import make_env
 
             self._ChannelFactoryInitialize(0, "lo")
-            # The hub env reads the embodiment from these variables (make_env takes no env kwargs).
+            # The hub env reads the embodiment and world from these variables (make_env takes no env kwargs).
             embodiment = {
                 "UNITREE_G1_MUJOCO_BODY": self.config.body,
                 "UNITREE_G1_MUJOCO_END_EFFECTOR": self.config.end_effector,
                 "UNITREE_G1_MUJOCO_HEAD_MOUNT": self.config.head_mount,
                 "UNITREE_G1_MUJOCO_HEAD_SENSOR": self.config.head_sensor,
             }
+            for name, value in (
+                ("WORLD", self.config.sim_world),
+                ("WORLD_RANDOMIZE", self.config.sim_world_randomize),
+            ):
+                if value is not None:
+                    embodiment[f"UNITREE_G1_MUJOCO_{name}"] = str(value)
             with _env_vars(embodiment):
                 self._env_wrapper = make_env(self.config.sim_env_repo_id, trust_remote_code=True)
             # Extract the actual gym env from the dict structure

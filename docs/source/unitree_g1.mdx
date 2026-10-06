@@ -608,6 +608,28 @@ lerobot-teleoperate \
   --teleop.type=unitree_g1_keyboard
 ```
 
+#### Worlds
+
+`--robot.sim_world` selects the sim's `WORLD` (exported as `UNITREE_G1_MUJOCO_WORLD`); unset keeps the plain
+floor. `pick_cylinder` puts a table in front of the robot with an upright cylinder on it (3 cm radius, 12 cm
+tall, 0.35 m ahead of a standing robot's pelvis and 0.10 m to the right) and adds a fixed `table_view`
+camera to the sim's image stream, so record it next to `head_camera`. `--robot.sim_world_randomize=0.02`
+(`UNITREE_G1_MUJOCO_WORLD_RANDOMIZE`) jitters the cylinder by up to 2 cm in x and y, and by up to 15 degrees
+of yaw, at the start and at every sim reset; the default is no jitter.
+
+```bash
+lerobot-record \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head_mount=pan_tilt --robot.head_sensor=d455 \
+  --robot.is_simulation=true --robot.controller=GrootLocomotionController \
+  --robot.sim_world=pick_cylinder --robot.sim_world_randomize=0.02 \
+  --robot.cameras='{"head_camera": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"head_camera","width":640,"height":480,"fps":30,"warmup_s":5}, "table_view": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"table_view","width":640,"height":480,"fps":30,"warmup_s":5}}' \
+  --teleop.type=unitree_g1_xr --teleop.body=23dof --teleop.end_effector=amazing_hand --teleop.head_mount=pan_tilt --teleop.head_sensor=d455 \
+  --dataset.repo_id=<user>/g1_sim_pick_cylinder --dataset.single_task="Pick up the cylinder" --dataset.reset_time_s=0
+```
+
+The AmazingHand model has no collision geometry yet, so its fingers do not press on the cylinder; only
+the arm links collide with it.
+
 Other sim options still come from `UNITREE_G1_MUJOCO_<OPTION>` environment variables (`ONSCREEN=0`
 for headless, `JOYSTICK_TYPE=dualshock4|xbox|switch`, `HEADHAND_STATE_PORT`, `HEADHAND_CMD_PORT`).
 While the elastic band holds the robot the locomotion controller is paused and the legs go limp. On

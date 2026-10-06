@@ -83,6 +83,13 @@ class UnitreeG1Config(RobotConfig):
     # HF Hub repo id passed to `make_env(..., trust_remote_code=True)` when is_simulation is True
     sim_env_repo_id: str = "k-valentin/unitree-g1-mujoco"
 
+    # Simulation only: the sim's WORLD ("pick_cylinder": a table with a free cylinder and a `table_view`
+    # camera). None keeps the sim's own default, the plain floor.
+    sim_world: str | None = None
+    # Simulation only: the sim's WORLD_RANDOMIZE, metres of uniform xy jitter (and +-15 deg yaw) of the
+    # world's objects at start and on every sim reset. None keeps the sim's own default (0).
+    sim_world_randomize: float | None = None
+
     # Socket config for ZMQ bridge
     robot_ip: str = "192.168.123.164"  # default G1 IP
 
@@ -143,6 +150,8 @@ class UnitreeG1Config(RobotConfig):
 
         if not (len(self.kp) == len(self.kd) == len(self.default_positions) == 29):
             raise ValueError("kp, kd and default_positions must all have length 29")
+        if self.sim_world_randomize is not None and self.sim_world_randomize < 0:
+            raise ValueError(f"sim_world_randomize must be >= 0, got {self.sim_world_randomize}")
         if self.stand_ramp_s <= 0:
             raise ValueError(f"stand_ramp_s must be > 0, got {self.stand_ramp_s}")
         if self.head_default_positions is None:

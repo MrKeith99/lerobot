@@ -128,6 +128,15 @@ class TestUnitreeG1Config:
     def test_default_sim_env_repo_id(self):
         assert UnitreeG1Config().sim_env_repo_id == "k-valentin/unitree-g1-mujoco"
 
+    def test_sim_world_defaults_to_the_sims_own(self):
+        cfg = UnitreeG1Config()
+        assert cfg.sim_world is None
+        assert cfg.sim_world_randomize is None
+
+    def test_negative_sim_world_randomize_is_rejected(self):
+        with pytest.raises(ValueError, match="sim_world_randomize"):
+            UnitreeG1Config(sim_world_randomize=-0.01)
+
 
 # ---------------------------------------------------------------------------
 # Robot mock and integration tests
@@ -339,6 +348,44 @@ def test_connect_uses_configured_sim_env_repo_id(unitree_g1):
         assert robot.sim_env is fake_inner_env
     # The sim gets the embodiment through its environment variables
     assert seen_env == dict(zip(embodiment_vars, ("29dof", "rubber_hand", "fixed", "d435i"), strict=True))
+
+
+def _connect_and_capture_world_vars(robot):
+    fake_inner_env = MagicMock()
+    fake_inner_env.simulator = None
+    fake_env_wrapper = {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
+    names = ("UNITREE_G1_MUJOCO_WORLD", "UNITREE_G1_MUJOCO_WORLD_RANDOMIZE")
+    seen_env = {}
+
+    def fake_make_env(*args, **kwargs):
+        seen_env.update({key: os.environ.get(key) for key in names})
+        return fake_env_wrapper
+
+    with patch("lerobot.envs.make_env", side_effect=fake_make_env):
+        robot.connect()
+    return seen_env, names
+
+
+def test_connect_exports_the_sim_world_when_set(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.sim_world = "pick_cylinder"
+    robot.config.sim_world_randomize = 0.02
+    seen_env, names = _connect_and_capture_world_vars(robot)
+    assert seen_env == dict(zip(names, ("pick_cylinder", "0.02"), strict=True))
+    assert all(name not in os.environ for name in names)
+
+
+def test_connect_exports_only_the_world_that_is_set(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.sim_world = "pick_cylinder"
+    seen_env, names = _connect_and_capture_world_vars(robot)
+    assert seen_env == {names[0]: "pick_cylinder", names[1]: None}
+
+
+def test_connect_does_not_export_the_world_when_unset(unitree_g1):
+    robot, _ = unitree_g1
+    seen_env, names = _connect_and_capture_world_vars(robot)
+    assert seen_env == dict.fromkeys(names)
 
 
 def test_disconnect_closes_sim_without_image_publisher(unitree_g1, caplog):
