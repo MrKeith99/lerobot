@@ -231,6 +231,9 @@ class UnitreeG1(Robot):
         band = getattr(sim, "elastic_band", None)
         return band is not None and band.enable
 
+    def ready_to_record(self) -> bool:
+        return not (self.config.is_simulation and self.config.controller and self._sim_band_attached())
+
     def _make_sim_legs_limp(self) -> None:
         """Zero legs/waist gains in the command send_action keeps republishing and in the one the sim holds."""
         msg = getattr(self, "msg", None)

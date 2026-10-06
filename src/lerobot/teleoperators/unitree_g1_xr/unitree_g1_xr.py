@@ -151,6 +151,9 @@ class UnitreeG1XRTeleop(Teleoperator):
     def engaged(self) -> bool:
         return self._engaged
 
+    def ready_to_record(self) -> bool:
+        return self._engaged
+
     def connect(self, calibrate: bool = True) -> None:
         require_package("xr_teleoperate", extra="unitree_g1_xr")
         from xr_teleoperate.core import G1ArmIK, XRInput, make_hand_retargeter

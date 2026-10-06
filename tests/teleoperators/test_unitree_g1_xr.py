@@ -425,3 +425,13 @@ def test_band_toggle_rearms_after_release(clock):
     assert toggles(teleop, clock, grips_frame(), 100).count(1.0) == 1
     step(teleop, clock, XRFrame(tracking=True))
     assert toggles(teleop, clock, grips_frame(), 100).count(1.0) == 1
+
+
+def test_ready_to_record_follows_engagement(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    assert teleop.ready_to_record() is False
+    press(teleop, clock, "a")
+    assert teleop.ready_to_record() is True
+    press(teleop, clock, "a")
+    assert teleop.ready_to_record() is False

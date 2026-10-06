@@ -494,3 +494,19 @@ def test_send_action_consumes_band_toggle_key_and_does_not_forward_it(unitree_g1
     assert SIM_BAND_TOGGLE_KEY not in robot.action_features
     robot._poll_sim_gamepad_buttons()
     assert band.enable is False
+
+
+@pytest.mark.parametrize(
+    ("is_simulation", "controller", "band_enabled", "expected"),
+    [
+        (False, None, True, True),
+        (True, None, True, True),
+        (True, "GrootLocomotionController", True, False),
+        (True, "GrootLocomotionController", False, True),
+    ],
+)
+def test_ready_to_record(is_simulation, controller, band_enabled, expected):
+    with _mocked_unitree_g1(controller=controller) as (robot, _):
+        robot.config.is_simulation = is_simulation
+        _attach_fake_sim(robot, set(), band_enabled=band_enabled)
+        assert robot.ready_to_record() is expected

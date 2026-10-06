@@ -193,6 +193,8 @@ class RecordConfig:
     play_sounds: bool = True
     # Resume recording on an existing dataset.
     resume: bool = False
+    # Start each episode only once the robot and teleoperator report ready (see ready_to_record).
+    wait_for_operator: bool = True
 
     def __post_init__(self):
         if self.teleop is None:
@@ -363,6 +365,36 @@ def record_loop(
         timestamp = time.perf_counter() - start_episode_t
 
 
+def components_not_ready(robot, teleop) -> list[str]:
+    """Hints for the robot / teleoperators whose `ready_to_record()` is False; those without it are ready."""
+    missing = []
+    ready = getattr(robot, "ready_to_record", None)
+    if callable(ready) and not ready():
+        missing.append(
+            "robot: release the sim elastic band (Quest: hold both grips 1 s while disengaged; "
+            "gamepad / viewer key 9 also work)"
+        )
+    for t in teleop if isinstance(teleop, list) else [teleop]:
+        ready = getattr(t, "ready_to_record", None)
+        if callable(ready) and not ready():
+            missing.append(f"{type(t).__name__}: engage the teleoperator (XR: press A)")
+    return missing
+
+
+def wait_until_ready(robot, teleop, events, play_sounds: bool = True, **record_loop_kwargs) -> None:
+    """Teleoperate without recording until robot and teleop are ready or stop is requested."""
+    missing = components_not_ready(robot, teleop)
+    if not missing:
+        return
+    logging.info("Waiting for the operator: %s", "; ".join(missing))
+    log_say("Waiting for the operator", play_sounds)
+    while missing and not events["stop_recording"]:
+        record_loop(robot=robot, events=events, teleop=teleop, control_time_s=0.5, **record_loop_kwargs)
+        missing = components_not_ready(robot, teleop)
+    events["exit_early"] = False
+    events["rerecord_episode"] = False
+
+
 @parser.wrap()
 def record(
     cfg: RecordConfig,
@@ -474,6 +506,23 @@ def record(
         with VideoEncodingManager(dataset):
             recorded_episodes = 0
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
+                if cfg.wait_for_operator:
+                    wait_until_ready(
+                        robot,
+                        teleop,
+                        events,
+                        play_sounds=cfg.play_sounds,
+                        fps=cfg.dataset.fps,
+                        teleop_action_processor=teleop_action_processor,
+                        robot_action_processor=robot_action_processor,
+                        robot_observation_processor=robot_observation_processor,
+                        single_task=cfg.dataset.single_task,
+                        display_data=cfg.display_data,
+                        display_mode=cfg.display_mode,
+                    )
+                    if events["stop_recording"]:
+                        break
+
                 log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
                 record_loop(
                     robot=robot,
