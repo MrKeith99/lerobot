@@ -396,8 +396,8 @@ def components_not_ready(robot, teleop) -> list[str]:
     ready = getattr(robot, "ready_to_record", None)
     if callable(ready) and not ready():
         missing.append(
-            "robot: release the sim elastic band (Quest: hold both grips 1 s while disengaged; "
-            "gamepad / viewer key 9 also work)"
+            "robot: start locomotion / release the sim band (Quest: hold both grips 1 s while disengaged; "
+            "sim: gamepad / viewer key 9 also work)"
         )
     for t in teleop if isinstance(teleop, list) else [teleop]:
         ready = getattr(t, "ready_to_record", None)

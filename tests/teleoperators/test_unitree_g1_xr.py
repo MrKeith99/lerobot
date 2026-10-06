@@ -28,8 +28,8 @@ from lerobot.robots.unitree_g1.g1_utils import (  # noqa: E402
     BASE_HEIGHT_KEY,
     BODY_KEYS,
     GROOT_BASE_HEIGHT_DEFAULT,
+    LOCOMOTION_TOGGLE_KEY,
     ROBOT_TYPE_FEEDBACK_KEY,
-    SIM_BAND_TOGGLE_KEY,
     SIM_RESET_KEY,
 )
 from lerobot.robots.unitree_g1.heads import HEAD_KEYS  # noqa: E402
@@ -364,14 +364,14 @@ def grips_frame(**buttons):
 
 
 def toggles(teleop, clock, frame, n):
-    return [step(teleop, clock, frame)[SIM_BAND_TOGGLE_KEY] for _ in range(n)]
+    return [step(teleop, clock, frame)[LOCOMOTION_TOGGLE_KEY] for _ in range(n)]
 
 
 def test_band_toggle_key_is_a_zero_action_feature(clock):
     teleop = make_teleop(clock)
-    assert SIM_BAND_TOGGLE_KEY in teleop.action_features
-    assert step(teleop, clock, XRFrame())[SIM_BAND_TOGGLE_KEY] == 0.0
-    assert step(teleop, clock, XRFrame(buttons={"left_grip": True}))[SIM_BAND_TOGGLE_KEY] == 0.0
+    assert LOCOMOTION_TOGGLE_KEY in teleop.action_features
+    assert step(teleop, clock, XRFrame())[LOCOMOTION_TOGGLE_KEY] == 0.0
+    assert step(teleop, clock, XRFrame(buttons={"left_grip": True}))[LOCOMOTION_TOGGLE_KEY] == 0.0
 
 
 def test_band_toggle_hold_must_be_positive():
@@ -525,7 +525,7 @@ def test_episode_end_cancels_the_grip_hold(clock):
     assert toggles(teleop, clock, grips_frame(), 30) == [0.0] * 30
     teleop.on_episode_end()
     assert teleop._grips_held_s == 0.0
-    assert step(teleop, clock, grips_frame())[SIM_BAND_TOGGLE_KEY] == 0.0
+    assert step(teleop, clock, grips_frame())[LOCOMOTION_TOGGLE_KEY] == 0.0
     assert toggles(teleop, clock, grips_frame(), 30) == [0.0] * 30
 
 

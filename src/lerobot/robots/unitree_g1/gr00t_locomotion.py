@@ -85,6 +85,7 @@ class GrootLocomotionController:
     """GR00T lower-body locomotion controller for the Unitree G1."""
 
     control_dt = CONTROL_DT  # Expose for unitree_g1.py
+    default_angles = GROOT_DEFAULT_ANGLES  # Standing pose the real robot ramps to before locomotion starts
 
     def __init__(self):
         # Load policies

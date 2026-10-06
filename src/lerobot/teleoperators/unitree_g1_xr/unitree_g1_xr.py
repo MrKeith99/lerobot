@@ -47,12 +47,12 @@ from lerobot.robots.unitree_g1.g1_utils import (
     GROOT_BASE_HEIGHT_DEFAULT,
     GROOT_BASE_HEIGHT_RANGE,
     GROOT_BASE_HEIGHT_RATE,
+    LOCOMOTION_TOGGLE_KEY,
     NAV_KEYS,
     REMOTE_AXES,
     REMOTE_BUTTONS,
     REMOTE_KEYS,
     ROBOT_TYPE_FEEDBACK_KEY,
-    SIM_BAND_TOGGLE_KEY,
     SIM_RESET_KEY,
     nav_from_remote,
 )
@@ -131,7 +131,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         if self.hand_spec is not None:
             keys += HAND_CLOSURE_KEYS + self.hand_spec.joint_keys()
         return dict.fromkeys(
-            keys + REMOTE_KEYS + NAV_KEYS + (BASE_HEIGHT_KEY, SIM_BAND_TOGGLE_KEY, SIM_RESET_KEY), float
+            keys + REMOTE_KEYS + NAV_KEYS + (BASE_HEIGHT_KEY, LOCOMOTION_TOGGLE_KEY, SIM_RESET_KEY), float
         )
 
     @property
@@ -182,7 +182,10 @@ class UnitreeG1XRTeleop(Teleoperator):
         print("  A: engage / disengage (face the robot's forward direction first)")
         print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
         print("  Right / left stick click: end episode success / rerecord")
-        print(f"  Both grips {cfg.band_toggle_hold_s:g} s (disengaged): sim elastic band")
+        print(
+            f"  Both grips {cfg.band_toggle_hold_s:g} s (disengaged): start / stop locomotion "
+            "(sim: release / attach the band)"
+        )
         if cfg.display_mode == "pass-through":
             print("  Headset shows pass-through (--teleop.display_mode=ego|immersive for the head camera)")
         else:
@@ -398,7 +401,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         buttons[_WAIST_LOWER_KEY] = float(lower)
         nav = nav_from_remote(axes["remote.lx"], axes["remote.ly"], axes["remote.rx"])
         band_toggle = {
-            SIM_BAND_TOGGLE_KEY: self._band_toggle(frame, dt),
+            LOCOMOTION_TOGGLE_KEY: self._band_toggle(frame, dt),
             SIM_RESET_KEY: self._sim_reset(),
         }
         return (

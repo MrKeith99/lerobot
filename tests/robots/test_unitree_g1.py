@@ -30,11 +30,11 @@ if not _unitree_sdk_available:
 
 from lerobot.robots.unitree_g1.config_unitree_g1 import UnitreeG1Config
 from lerobot.robots.unitree_g1.g1_utils import (
+    LOCOMOTION_TOGGLE_KEY,
     NUM_MOTORS,
     REMOTE_AXES,
     REMOTE_BUTTONS,
     REMOTE_KEYS,
-    SIM_BAND_TOGGLE_KEY,
     SIM_RESET_KEY,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
@@ -432,7 +432,7 @@ def test_sim_reset_button_reattaches_band_and_limps_legs(unitree_g1):
 
 
 def _band_action(value: float | None) -> dict[str, float]:
-    return {} if value is None else {SIM_BAND_TOGGLE_KEY: value}
+    return {} if value is None else {LOCOMOTION_TOGGLE_KEY: value}
 
 
 def test_sim_band_toggle_key_rising_edge_works_without_joystick(unitree_g1):
@@ -490,9 +490,9 @@ def test_send_action_consumes_band_toggle_key_and_does_not_forward_it(unitree_g1
     robot, _ = unitree_g1
     band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
     robot.publish_lowcmd = MagicMock()
-    sent = robot.send_action({SIM_BAND_TOGGLE_KEY: 1.0})
-    assert SIM_BAND_TOGGLE_KEY not in sent
-    assert SIM_BAND_TOGGLE_KEY not in robot.action_features
+    sent = robot.send_action({LOCOMOTION_TOGGLE_KEY: 1.0})
+    assert LOCOMOTION_TOGGLE_KEY not in sent
+    assert LOCOMOTION_TOGGLE_KEY not in robot.action_features
     robot._poll_sim_gamepad_buttons()
     assert band.enable is False
 
@@ -561,6 +561,223 @@ def test_send_action_consumes_reset_key_and_does_not_forward_it(unitree_g1):
     assert SIM_RESET_KEY not in robot.action_features
     robot._poll_sim_gamepad_buttons()
     robot.sim_env.reset.assert_called_once_with()
+
+
+class _FakeController:
+    control_dt = 0.02
+
+    def __init__(self, with_gains=True):
+        self.default_angles = np.linspace(-0.5, 0.5, 29).astype(np.float32)
+        if with_gains:
+            self.kp = np.arange(29, dtype=np.float32) + 100.0
+            self.kd = np.arange(29, dtype=np.float32) + 10.0
+        self.calls = []
+        self.run_step = MagicMock(side_effect=lambda *a: self.calls.append("run_step") or {})
+        self.reset = MagicMock(side_effect=lambda: self.calls.append("reset"))
+
+
+def _lowstate(q=0.0):
+    state = MagicMock()
+    for i in range(29):
+        state.motor_state[i].q = q + 0.01 * i
+    return state
+
+
+@contextlib.contextmanager
+def _real_gated_robot(gate=True, controller=None, **config_kwargs):
+    with _mocked_unitree_g1(
+        controller="GrootLocomotionController", locomotion_start_gate=gate, **config_kwargs
+    ) as (robot, _):
+        robot.config.is_simulation = False
+        robot.controller = controller or _FakeController()
+        robot.kp = np.array(robot.config.kp, dtype=np.float32)
+        robot.kd = np.array(robot.config.kd, dtype=np.float32)
+        robot.publish_lowcmd = MagicMock()
+        yield robot
+
+
+def _published_q(robot):
+    action = robot.publish_lowcmd.call_args.args[0]
+    return np.array([action[f"{G1_29_JointIndex(i).name}.q"] for i in range(15)])
+
+
+def _toggle(robot):
+    robot._request_locomotion_toggle({LOCOMOTION_TOGGLE_KEY: 0.0})
+    robot._request_locomotion_toggle({LOCOMOTION_TOGGLE_KEY: 1.0})
+
+
+def test_stand_ramp_must_be_positive():
+    with pytest.raises(ValueError, match="stand_ramp_s"):
+        UnitreeG1Config(stand_ramp_s=0.0)
+    assert UnitreeG1Config().locomotion_start_gate is True
+    assert UnitreeG1Config().stand_ramp_s == 3.0
+
+
+def test_gate_does_not_run_policy_before_enable():
+    with _real_gated_robot() as robot:
+        for t in (0.0, 1.0, 5.0, 10.0):
+            robot._controller_iteration(_lowstate(), t)
+        robot.controller.run_step.assert_not_called()
+        assert robot._locomotion_enabled is False
+
+
+def test_gate_ramps_from_measured_to_standing_pose_then_holds():
+    with _real_gated_robot() as robot:
+        start = _lowstate(0.3)
+        robot._controller_iteration(start, 100.0)
+        np.testing.assert_allclose(
+            _published_q(robot), [start.motor_state[i].q for i in range(15)], atol=1e-6
+        )
+        standing = robot.controller.default_angles[:15]
+        measured = np.array([start.motor_state[i].q for i in range(15)])
+
+        robot._controller_iteration(_lowstate(-1.0), 101.5)  # later measurements do not move the ramp start
+        np.testing.assert_allclose(_published_q(robot), measured + (standing - measured) * 0.5, atol=1e-6)
+
+        for t in (103.0, 110.0):
+            robot._controller_iteration(_lowstate(0.9), t)
+            np.testing.assert_allclose(_published_q(robot), standing, atol=1e-6)
+
+
+def test_gate_uses_controller_gains_and_only_commands_legs_and_waist():
+    with _real_gated_robot() as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        action = robot.publish_lowcmd.call_args.args[0]
+        assert sorted(action) == sorted(f"{G1_29_JointIndex(i).name}.q" for i in range(15))
+        assert robot.publish_lowcmd.call_args.kwargs["kp"] is robot.controller.kp
+        assert robot.publish_lowcmd.call_args.kwargs["kd"] is robot.controller.kd
+
+
+def test_gate_falls_back_to_config_gains_and_default_positions():
+    controller = _FakeController(with_gains=False)
+    del controller.default_angles
+    with _real_gated_robot(controller=controller) as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        assert robot.publish_lowcmd.call_args.kwargs["kp"] is robot.kp
+        assert robot.publish_lowcmd.call_args.kwargs["kd"] is robot.kd
+        robot._controller_iteration(_lowstate(), 10.0)
+        np.testing.assert_allclose(_published_q(robot), robot.config.default_positions[:15], atol=1e-6)
+
+
+def test_gate_ignores_malformed_controller_standing_pose():
+    controller = _FakeController()
+    controller.default_angles = MagicMock()
+    with _real_gated_robot(controller=controller) as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        robot._controller_iteration(_lowstate(), 10.0)
+        np.testing.assert_allclose(_published_q(robot), robot.config.default_positions[:15], atol=1e-6)
+
+
+def test_gate_leaves_arm_motors_untouched():
+    with _real_gated_robot() as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        robot._controller_iteration(_lowstate(), 4.0)
+        for call in robot.publish_lowcmd.call_args_list:
+            assert all(G1_29_JointIndex[key[:-2]].value < 15 for key in call.args[0])
+
+
+def test_enable_refused_before_ramp_ends():
+    with _real_gated_robot() as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        _toggle(robot)
+        robot._controller_iteration(_lowstate(), 2.9)
+        assert robot._locomotion_enabled is False
+        robot.controller.run_step.assert_not_called()
+        robot.controller.reset.assert_not_called()
+        assert robot.ready_to_record() is False
+
+
+def test_enable_resets_then_runs_policy_with_controller_gains():
+    with _real_gated_robot() as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        robot._controller_iteration(_lowstate(), 3.0)
+        _toggle(robot)
+        robot._controller_iteration(_lowstate(), 3.02)
+        assert robot._locomotion_enabled is True
+        assert robot.controller.calls == ["reset", "run_step"]
+        assert robot.publish_lowcmd.call_args.kwargs["kp"] is robot.controller.kp
+        robot._controller_iteration(_lowstate(), 3.04)
+        assert robot.controller.calls == ["reset", "run_step", "run_step"]
+        assert robot.ready_to_record() is True
+
+
+def test_disable_holds_the_current_measured_pose_without_ramp():
+    with _real_gated_robot() as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        robot._controller_iteration(_lowstate(), 3.0)
+        _toggle(robot)
+        robot._controller_iteration(_lowstate(), 3.02)
+        robot.controller.run_step.reset_mock()
+
+        _toggle_off = _lowstate(0.2)
+        robot._request_locomotion_toggle({LOCOMOTION_TOGGLE_KEY: 0.0})
+        robot._request_locomotion_toggle({LOCOMOTION_TOGGLE_KEY: 1.0})
+        robot._controller_iteration(_toggle_off, 5.0)
+        assert robot._locomotion_enabled is False
+        robot.controller.run_step.assert_not_called()
+        held = [_toggle_off.motor_state[i].q for i in range(15)]
+        np.testing.assert_allclose(_published_q(robot), held, atol=1e-6)
+        assert robot.publish_lowcmd.call_args.kwargs["kp"] is robot.controller.kp
+
+        robot._controller_iteration(_lowstate(0.8), 5.02)  # keeps holding the pose captured at the stop
+        np.testing.assert_allclose(_published_q(robot), held, atol=1e-6)
+        assert robot.ready_to_record() is False
+
+
+def test_locomotion_toggle_is_rising_edge_only():
+    with _real_gated_robot() as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        robot._controller_iteration(_lowstate(), 3.0)
+        for _ in range(5):
+            robot._request_locomotion_toggle({LOCOMOTION_TOGGLE_KEY: 1.0})
+        robot._controller_iteration(_lowstate(), 3.02)
+        assert robot._locomotion_enabled is True
+        for _ in range(5):
+            robot._request_locomotion_toggle({LOCOMOTION_TOGGLE_KEY: 1.0})
+        robot._controller_iteration(_lowstate(), 3.04)
+        assert robot._locomotion_enabled is True
+
+
+def test_toggle_key_is_consumed_by_send_action_on_the_real_robot():
+    with _real_gated_robot() as robot:
+        sent = robot.send_action({LOCOMOTION_TOGGLE_KEY: 1.0})
+        assert LOCOMOTION_TOGGLE_KEY not in sent
+        assert robot._locomotion_toggle_requested is True
+
+
+def test_gate_off_runs_policy_from_the_first_iteration():
+    with _real_gated_robot(gate=False) as robot:
+        robot._controller_iteration(_lowstate(), 0.0)
+        assert robot.controller.calls == ["run_step"]
+        robot.publish_lowcmd.assert_called_once()
+        _toggle(robot)
+        assert robot._locomotion_toggle_requested is False
+
+
+def test_sim_with_gate_default_runs_policy_and_ignores_locomotion_toggle():
+    with _mocked_unitree_g1(controller="GrootLocomotionController") as (robot, _):
+        robot.controller = _FakeController()
+        robot.publish_lowcmd = MagicMock()
+        robot._controller_iteration(_lowstate(), 0.0)
+        assert robot.controller.calls == ["run_step"]
+        _toggle(robot)
+        assert robot._locomotion_toggle_requested is False
+
+
+@pytest.mark.parametrize(
+    ("gate", "controller", "enabled", "expected"),
+    [
+        (True, "GrootLocomotionController", False, False),
+        (True, "GrootLocomotionController", True, True),
+        (False, "GrootLocomotionController", False, True),
+        (True, None, False, True),
+    ],
+)
+def test_ready_to_record_real_robot(gate, controller, enabled, expected):
+    with _mocked_unitree_g1(controller=controller, locomotion_start_gate=gate) as (robot, _):
+        robot.config.is_simulation = False
+        robot._locomotion_enabled = enabled
+        assert robot.ready_to_record() is expected
 
 
 @pytest.mark.parametrize(

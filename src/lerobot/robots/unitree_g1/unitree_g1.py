@@ -40,10 +40,11 @@ from .end_effectors import HAND_CLOSURE_KEYS, HAND_SIDES, HAND_SPECS, hand_closu
 from .g1_kinematics import G1_29_ArmIK
 from .g1_utils import (
     BASE_HEIGHT_KEY,
+    LOCOMOTION_TOGGLE_KEY,
     MODE_MACHINE_BY_REVISION,
     NAV_KEYS,
+    NUM_MOTORS,
     REMOTE_KEYS,
-    SIM_BAND_TOGGLE_KEY,
     SIM_RESET_KEY,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
@@ -227,6 +228,20 @@ class UnitreeG1(Robot):
         self._reset_was_requested = False
         self._reset_button_was_pressed = False
         self._band_was_attached = False
+        self._locomotion_enabled = False
+        self._locomotion_toggle_requested = False
+        self._locomotion_toggle_was_requested = False
+        self._stand_start_q: np.ndarray | None = None
+        self._stand_start_t = 0.0
+        self._leg_hold_q: np.ndarray | None = None
+
+    @property
+    def _locomotion_gated(self) -> bool:
+        return (
+            not self.config.is_simulation
+            and self.controller is not None
+            and self.config.locomotion_start_gate
+        )
 
     def _sim_band_attached(self) -> bool:
         """True while the simulated robot hangs on the MuJoCo elastic band."""
@@ -235,6 +250,8 @@ class UnitreeG1(Robot):
         return band is not None and band.enable
 
     def ready_to_record(self) -> bool:
+        if self._locomotion_gated and not self._locomotion_enabled:
+            return False
         return not (self.config.is_simulation and self.config.controller and self._sim_band_attached())
 
     def _make_sim_legs_limp(self) -> None:
@@ -261,11 +278,17 @@ class UnitreeG1(Robot):
         logger.info(f"Elastic band {'attached' if band.enable else 'released'}")
 
     def _request_sim_band_toggle(self, action: RobotAction) -> None:
-        requested = float(action.get(SIM_BAND_TOGGLE_KEY, 0.0)) > 0.5
+        requested = float(action.get(LOCOMOTION_TOGGLE_KEY, 0.0)) > 0.5
         enabled = self.config.is_simulation and self.config.sim_band_toggle_button is not None
         if requested and not self._band_toggle_was_requested and enabled:
             self._band_toggle_requested = True
         self._band_toggle_was_requested = requested
+
+    def _request_locomotion_toggle(self, action: RobotAction) -> None:
+        requested = float(action.get(LOCOMOTION_TOGGLE_KEY, 0.0)) > 0.5
+        if requested and not self._locomotion_toggle_was_requested and self._locomotion_gated:
+            self._locomotion_toggle_requested = True
+        self._locomotion_toggle_was_requested = requested
 
     def _request_sim_reset(self, action: RobotAction) -> None:
         requested = float(action.get(SIM_RESET_KEY, 0.0)) > 0.5
@@ -434,6 +457,90 @@ class UnitreeG1(Robot):
     def _base_height_features(self) -> dict[str, type]:
         return {BASE_HEIGHT_KEY: float} if self._base_height_enabled else {}
 
+    def _controller_iteration(self, lowstate, now: float) -> None:
+        """One controller-loop step: hold / ramp the legs while locomotion is gated, else run the policy."""
+        with self._controller_action_lock:
+            controller_input = dict(self.controller_input)
+
+        if self._locomotion_gated and self._gated_leg_step(lowstate, now):
+            return
+
+        # Simulation: keep the policy off while the robot hangs on the elastic band (legs limp) and start it
+        # from a fresh state when the band is released. Run while hanging, the policy can lock into a
+        # sustained leg-kicking oscillation, e.g. after a reset.
+        if self._sim_band_attached():
+            if not self._band_was_attached:
+                self._band_was_attached = True
+                self._make_sim_legs_limp()
+            return
+        if self._band_was_attached:
+            self._band_was_attached = False
+            if hasattr(self.controller, "reset"):
+                self.controller.reset()
+
+        controller_action = self.controller.run_step(controller_input, lowstate)
+
+        # Band re-attached during this step: drop its output so it can't restore the leg gains
+        if self._sim_band_attached():
+            return
+
+        with self._controller_action_lock:
+            self.controller_output = dict(controller_action)
+
+        ctrl_kp = self.controller.kp if hasattr(self.controller, "kp") else None
+        ctrl_kd = self.controller.kd if hasattr(self.controller, "kd") else None
+        self.publish_lowcmd(controller_action, kp=ctrl_kp, kd=ctrl_kd)
+
+    def _gated_leg_step(self, lowstate, now: float) -> bool:
+        """Real robot with the start gate: handle the operator toggle and, while locomotion is off, publish
+        the legs + waist (ramp to the standing pose, then hold). Returns True when the policy must not run."""
+        measured = np.array([lowstate.motor_state[i].q for i in range(15)], dtype=np.float32)
+        if self._stand_start_q is None:
+            self._stand_start_q = measured
+            self._stand_start_t = now
+        elapsed = now - self._stand_start_t
+        ramp_done = elapsed >= self.config.stand_ramp_s
+
+        toggle, self._locomotion_toggle_requested = self._locomotion_toggle_requested, False
+        if toggle:
+            if self._locomotion_enabled:
+                self._locomotion_enabled = False
+                self._leg_hold_q = measured
+                logger.info("Locomotion stopped (operator): legs holding")
+            elif not ramp_done:
+                logger.warning("Locomotion start refused: legs are still ramping to the standing pose")
+            else:
+                self._locomotion_enabled = True
+                if hasattr(self.controller, "reset"):
+                    self.controller.reset()
+                logger.info("Locomotion started (operator)")
+        if self._locomotion_enabled:
+            return False
+
+        standing = self._standing_pose()
+        if self._leg_hold_q is not None:
+            target = self._leg_hold_q
+        else:
+            alpha = min(elapsed / self.config.stand_ramp_s, 1.0)
+            target = self._stand_start_q + (standing[:15] - self._stand_start_q) * alpha
+        ctrl_kp = getattr(self.controller, "kp", None)
+        ctrl_kd = getattr(self.controller, "kd", None)
+        self.publish_lowcmd(
+            {f"{G1_29_JointIndex(i).name}.q": float(target[i]) for i in range(15)},
+            kp=ctrl_kp if ctrl_kp is not None else self.kp,
+            kd=ctrl_kd if ctrl_kd is not None else self.kd,
+        )
+        return True
+
+    def _standing_pose(self) -> np.ndarray:
+        try:
+            angles = np.asarray(getattr(self.controller, "default_angles", None), dtype=np.float32)
+        except (TypeError, ValueError):
+            angles = None
+        if angles is None or angles.shape != (NUM_MOTORS,):
+            angles = np.asarray(self.config.default_positions, dtype=np.float32)
+        return angles
+
     def _controller_loop(self):
         """Background thread that runs controller at policy's control_dt."""
         control_dt = self.controller.control_dt
@@ -457,38 +564,7 @@ class UnitreeG1(Robot):
                     )
                     loop_count = 0
                     last_log_time = time.time()
-                # Read controller input snapshot
-                with self._controller_action_lock:
-                    controller_input = dict(self.controller_input)
-
-                # Simulation: keep the policy off while the robot hangs on the elastic band (legs limp) and start it
-                # from a fresh state when the band is released. Run while hanging, the policy can lock into a
-                # sustained leg-kicking oscillation, e.g. after a reset.
-                if self._sim_band_attached():
-                    if not self._band_was_attached:
-                        self._band_was_attached = True
-                        self._make_sim_legs_limp()
-                    time.sleep(control_dt)
-                    continue
-                if self._band_was_attached:
-                    self._band_was_attached = False
-                    if hasattr(self.controller, "reset"):
-                        self.controller.reset()
-
-                # Run controller step
-                controller_action = self.controller.run_step(controller_input, lowstate)
-
-                # Band re-attached during this step: drop its output so it can't restore the leg gains
-                if self._sim_band_attached():
-                    continue
-
-                # Write controller output snapshot
-                with self._controller_action_lock:
-                    self.controller_output = dict(controller_action)
-
-                ctrl_kp = self.controller.kp if hasattr(self.controller, "kp") else None
-                ctrl_kd = self.controller.kd if hasattr(self.controller, "kd") else None
-                self.publish_lowcmd(controller_action, kp=ctrl_kp, kd=ctrl_kd)
+                self._controller_iteration(lowstate, time.monotonic())
 
             elapsed = time.time() - start_time
             sleep_time = max(0, control_dt - elapsed)
@@ -766,7 +842,8 @@ class UnitreeG1(Robot):
         returns the action with the head/hand targets as sent (clamped)."""
         action = dict(action)
         self._request_sim_band_toggle(action)
-        action.pop(SIM_BAND_TOGGLE_KEY, None)
+        self._request_locomotion_toggle(action)
+        action.pop(LOCOMOTION_TOGGLE_KEY, None)
         self._request_sim_reset(action)
         action.pop(SIM_RESET_KEY, None)
         sent: dict[str, float] = {}

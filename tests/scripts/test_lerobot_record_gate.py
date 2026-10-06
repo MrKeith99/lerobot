@@ -56,7 +56,7 @@ def test_components_without_the_method_are_ready():
 def test_components_not_ready_names_the_missing_ones():
     missing = components_not_ready(Ready(None), [Plain(), Ready(None), Ready(0)])
     assert len(missing) == 2
-    assert "elastic band" in missing[0]
+    assert "start locomotion" in missing[0]
     assert "press A" in missing[1]
 
 

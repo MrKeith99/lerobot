@@ -100,6 +100,11 @@ class UnitreeG1Config(RobotConfig):
     # `kBaseHeight.cmd` (m), instead of integrating remote R1/R2 inside the controller.
     base_height_action: bool = True
 
+    # Real robot only: with a controller, the legs ramp to the controller's standing pose and hold until the
+    # operator starts locomotion (Quest: both grips). False = start the controller at connect.
+    locomotion_start_gate: bool = True
+    stand_ramp_s: float = 3.0
+
     # Simulation only: gamepad (pygame) button index that toggles the MuJoCo elastic band, same as
     # pressing "9" in the viewer. 10 = PS button on a DualShock 4. None disables it.
     sim_band_toggle_button: int | None = 10
@@ -138,6 +143,8 @@ class UnitreeG1Config(RobotConfig):
 
         if not (len(self.kp) == len(self.kd) == len(self.default_positions) == 29):
             raise ValueError("kp, kd and default_positions must all have length 29")
+        if self.stand_ramp_s <= 0:
+            raise ValueError(f"stand_ramp_s must be > 0, got {self.stand_ramp_s}")
         if self.head_default_positions is None:
             self.head_default_positions = list(DEFAULT_HEAD_Q) if self.head_mount == "pan_tilt" else []
         expected_head = len(DEFAULT_HEAD_Q) if self.head_mount == "pan_tilt" else 0
