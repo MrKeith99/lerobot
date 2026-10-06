@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import inspect
 from unittest.mock import patch
 
 import pytest
@@ -21,6 +22,7 @@ import pytest
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
 pytest.importorskip("deepdiff", reason="deepdiff is required (install lerobot[hardware])")
 
+from lerobot.scripts import lerobot_record  # noqa: E402
 from lerobot.scripts.lerobot_record import RecordConfig, components_not_ready, wait_until_ready  # noqa: E402
 
 
@@ -91,3 +93,29 @@ def test_stop_during_wait_leaves_the_loop():
         wait_until_ready(Ready(None), Plain(), events, play_sounds=False)
     assert loop.call_count == 1
     assert events["stop_recording"] is True
+
+
+class Notified:
+    def __init__(self):
+        self.ended = 0
+
+    def on_episode_end(self):
+        self.ended += 1
+
+
+def test_notify_episode_end_calls_teleops_that_define_it():
+    single, first, second = Notified(), Notified(), Notified()
+    lerobot_record.notify_episode_end(single)
+    lerobot_record.notify_episode_end([first, Plain(), second])
+    lerobot_record.notify_episode_end(Plain())
+    lerobot_record.notify_episode_end(None)
+    assert (single.ended, first.ended, second.ended) == (1, 1, 1)
+
+
+def test_record_notifies_right_after_the_episode_loop_before_the_reset_phase():
+    source = inspect.getsource(lerobot_record.record)
+    episode_loop = source.index("dataset=dataset,")
+    notify = source.index("notify_episode_end(teleop)")
+    reset_phase = source.index("Reset the environment")
+    rerecord = source.index("clear_episode_buffer()")
+    assert episode_loop < notify < reset_phase < rerecord

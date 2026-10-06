@@ -382,6 +382,14 @@ def record_loop(
         timestamp = time.perf_counter() - start_episode_t
 
 
+def notify_episode_end(teleop) -> None:
+    """Call `on_episode_end()` on the teleoperators that define it."""
+    for t in teleop if isinstance(teleop, list) else [teleop]:
+        on_episode_end = getattr(t, "on_episode_end", None)
+        if callable(on_episode_end):
+            on_episode_end()
+
+
 def components_not_ready(robot, teleop) -> list[str]:
     """Hints for the robot / teleoperators whose `ready_to_record()` is False; those without it are ready."""
     missing = []
@@ -556,6 +564,7 @@ def record(
                     display_mode=cfg.display_mode,
                     display_compressed_images=display_compressed_images,
                 )
+                notify_episode_end(teleop)
 
                 # Execute a few seconds without recording to give time to manually reset the environment
                 # Skip reset for the last episode to be recorded

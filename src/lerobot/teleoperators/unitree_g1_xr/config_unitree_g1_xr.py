@@ -64,6 +64,9 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     band_toggle_hold_s: float = 1.0
     # B held this long while disengaged resets the sim to its start pose on the elastic band.
     sim_reset_hold_s: float = 2.0
+    # Sim only: disengage and reset the sim at the end of every episode (the robot ignores the reset on
+    # hardware or with --robot.sim_reset_button=null).
+    reset_sim_on_episode_end: bool = True
 
     def __post_init__(self) -> None:
         if self.band_toggle_hold_s <= 0:

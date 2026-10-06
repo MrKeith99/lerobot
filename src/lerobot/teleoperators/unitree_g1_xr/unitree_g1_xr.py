@@ -127,6 +127,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._reset_hold_valid = False
         self._reset_fired = False
         self._resync_s = 0.0
+        self._reset_pending = False
 
     @cached_property
     def action_features(self) -> dict[str, type]:
@@ -329,7 +330,27 @@ class UnitreeG1XRTeleop(Teleoperator):
         logger.info("XR teleop: both grips held, toggling the sim elastic band")
         return 1.0
 
+    def _fire_sim_reset(self) -> float:
+        self._resync_s = _RESET_RESYNC_S
+        return 1.0
+
+    def on_episode_end(self) -> None:
+        if not self.config.reset_sim_on_episode_end:
+            return
+        self._engaged = False
+        self._catching_up = False
+        self._grips_held_s = 0.0
+        self._band_toggle_fired = False
+        self._reset_held_s = 0.0
+        self._reset_hold_valid = False
+        self._reset_fired = False
+        self._reset_pending = True
+        logger.info("Episode ended: disengaged, resetting the sim")
+
     def _sim_reset(self, frame: Any, dt: float, was_engaged: bool, b_pressed: bool) -> float:
+        if self._reset_pending:
+            self._reset_pending = False
+            return self._fire_sim_reset()
         if not frame.buttons.get("b", False):
             self._reset_held_s = 0.0
             self._reset_hold_valid = False
@@ -344,9 +365,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         if self._reset_fired or self._reset_held_s < self.config.sim_reset_hold_s:
             return 0.0
         self._reset_fired = True
-        self._resync_s = _RESET_RESYNC_S
         logger.info("XR teleop: B held, resetting the sim to its start pose")
-        return 1.0
+        return self._fire_sim_reset()
 
     @check_if_not_connected
     def get_action(self) -> RobotAction:

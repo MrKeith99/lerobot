@@ -535,6 +535,11 @@ With `lerobot-record`, each episode starts only once the operator is ready: in s
 released (when a locomotion controller is set) and the XR teleoperator is engaged with A. Pass
 `--wait_for_operator=false` to start episodes immediately as before.
 
+In sim, at the end of each episode the XR teleoperator disengages and resets the sim: the robot is back
+on the band at its start pose. Release the band with both grips, then press A, and the next episode
+starts. With this and the operator gate, `--dataset.reset_time_s=0` is recommended for XR sim recording.
+`--teleop.reset_sim_on_episode_end=false` disables the automatic reset.
+
 Nothing moves until A; the arms then move to your pose at `--teleop.engage_arm_speed_rad_s` (0.5) before following at full speed, and targets hold while tracking is lost. `--teleop.input_mode=hand` uses hand
 tracking (pinch closes the hand; it engages when tracking starts).
 

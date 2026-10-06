@@ -538,3 +538,65 @@ def test_ready_to_record_follows_engagement(clock):
     assert teleop.ready_to_record() is True
     press(teleop, clock, "a")
     assert teleop.ready_to_record() is False
+
+
+def test_reset_sim_on_episode_end_defaults_on():
+    assert UnitreeG1XRTeleopConfig().reset_sim_on_episode_end is True
+
+
+def test_episode_end_disengages_and_resets_the_sim_once(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    assert teleop.engaged
+    teleop.on_episode_end()
+    assert not teleop.engaged
+    assert teleop.ready_to_record() is False
+    values = [step(teleop, clock, XRFrame(tracking=True))[SIM_RESET_KEY] for _ in range(150)]
+    assert values[0] == 1.0
+    assert values.count(1.0) == 1
+
+
+def test_episode_end_logs_one_info_line(clock, caplog):
+    teleop = make_teleop(clock)
+    with caplog.at_level("INFO"):
+        teleop.on_episode_end()
+    assert [r.getMessage() for r in caplog.records] == ["Episode ended: disengaged, resetting the sim"]
+
+
+def test_episode_end_starts_the_resync_window(clock):
+    teleop = make_teleop(clock)
+    key = BODY_KEYS[0]
+    teleop.send_feedback(observation())
+    teleop.on_episode_end()
+    assert step(teleop, clock, XRFrame())[SIM_RESET_KEY] == 1.0
+    teleop.send_feedback(observation(**{key: 0.7}))
+    assert step(teleop, clock)[key] == pytest.approx(0.7)
+    step(teleop, clock, n=60)
+    teleop.send_feedback(observation(**{key: -0.3}))
+    assert step(teleop, clock)[key] == pytest.approx(0.7)
+
+
+def test_episode_end_cancels_grip_and_b_holds(clock):
+    teleop = make_teleop(clock)
+    assert toggles(teleop, clock, grips_frame(), 30) == [0.0] * 30
+    teleop.on_episode_end()
+    assert teleop._grips_held_s == 0.0
+    assert step(teleop, clock, grips_frame())[SIM_BAND_TOGGLE_KEY] == 0.0
+    assert toggles(teleop, clock, grips_frame(), 30) == [0.0] * 30
+
+    other = make_teleop(clock)
+    assert resets(other, clock, b_frame(), 60) == [0.0] * 60
+    other.on_episode_end()
+    values = resets(other, clock, b_frame(), 150)
+    assert values[0] == 1.0
+    assert values.count(1.0) == 1
+
+
+def test_episode_end_does_nothing_when_the_option_is_off(clock):
+    teleop = make_teleop(clock, reset_sim_on_episode_end=False)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    teleop.on_episode_end()
+    assert teleop.engaged
+    assert [step(teleop, clock, XRFrame(tracking=True))[SIM_RESET_KEY] for _ in range(100)] == [0.0] * 100
