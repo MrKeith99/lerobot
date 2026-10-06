@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import threading
 import time
 from collections.abc import Mapping
@@ -38,6 +39,10 @@ else:
     zmq = None  # type: ignore[assignment]
 
 from .headhand_devices import HeadHandDevice
+
+logger = logging.getLogger(__name__)
+
+SLOW_CYCLE_LOG_INTERVAL_S = 5.0
 
 HEADHAND_CMD_PORT = 6002
 HEADHAND_STATE_PORT = 6003
@@ -225,6 +230,8 @@ class HeadHandServer:
 
         period = 1.0 / self.rate_hz
         first_iteration = True
+        slow_cycles = 0
+        last_slow_log = float("-inf")
         while not shutdown_event.is_set():
             t0 = time.time()
             error: str | None = None
@@ -247,6 +254,19 @@ class HeadHandServer:
             sleep = period - (time.time() - t0)
             if sleep > 0:
                 time.sleep(sleep)
+            else:
+                slow_cycles += 1
+                now = time.monotonic()
+                if now - last_slow_log >= SLOW_CYCLE_LOG_INTERVAL_S:
+                    logger.warning(
+                        "Head/hand cycle took %.1f ms > %.1f ms (%d slow cycles); lower --headhand-rate "
+                        "or disable --hand-force-limit",
+                        (time.time() - t0) * 1e3,
+                        period * 1e3,
+                        slow_cycles,
+                    )
+                    last_slow_log = now
+                    slow_cycles = 0
 
     def stop(self) -> None:
         if self._state_sock is not None:

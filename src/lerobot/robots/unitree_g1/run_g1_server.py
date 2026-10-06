@@ -31,6 +31,7 @@ import argparse
 import base64
 import contextlib
 import json
+import logging
 import threading
 import time
 from typing import Any
@@ -54,6 +55,7 @@ from unitree_sdk2py.utils.crc import CRC
 
 from lerobot.cameras.zmq.image_server import ImageServer
 from lerobot.robots.unitree_g1.dex_hands import dex_topics
+from lerobot.robots.unitree_g1.hand_force import add_hand_force_args, hand_force_from_args
 from lerobot.robots.unitree_g1.headhand_devices import DEFAULT_HAND_PORT, DEFAULT_HEAD_PORT, HeadHandDevice
 from lerobot.robots.unitree_g1.headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT, HeadHandServer
 from lerobot.robots.unitree_g1.unitree_sdk2_socket import (
@@ -246,6 +248,7 @@ def build_camera_config(args: argparse.Namespace) -> dict:
 
 def main() -> None:
     """Main entry point for the robot server bridge."""
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="DDS-to-ZMQ bridge server for Unitree G1")
     parser.add_argument("--camera", action="store_true", help="Also launch camera server")
     parser.add_argument("--camera-type", choices=["opencv", "intelrealsense"], default="opencv")
@@ -269,6 +272,7 @@ def main() -> None:
     parser.add_argument("--headhand-state-port", type=int, default=HEADHAND_STATE_PORT)
     parser.add_argument("--headhand-cmd-port", type=int, default=HEADHAND_CMD_PORT)
     parser.add_argument("--no-handshake", action="store_true", help="Skip head/hand connect handshake")
+    add_hand_force_args(parser)
     args = parser.parse_args()
     if args.camera and args.camera_type == "intelrealsense" and not args.camera_serial:
         parser.error("--camera-serial is required with --camera-type intelrealsense")
@@ -349,7 +353,9 @@ def main() -> None:
     t_headhand = None
     if args.headhand:
         device = HeadHandDevice(
-            None if args.no_head else args.head_port, None if args.no_hands else args.hand_port
+            None if args.no_head else args.head_port,
+            None if args.no_hands else args.hand_port,
+            hand_force=hand_force_from_args(args),
         )
         device.connect(handshake=not args.no_handshake)
         device.configure()

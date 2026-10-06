@@ -176,3 +176,23 @@ def test_headhand_server_keeps_running_on_bus_error():
         t.join(timeout=2.0)
         client.disconnect()
         server.stop()
+
+
+def test_headhand_server_warns_when_a_cycle_overruns(caplog):
+    device = MagicMock(name="Device")
+
+    def slow_read():
+        time.sleep(0.03)
+        return {}
+
+    device.read_ticks.side_effect = slow_read
+    server = gz.HeadHandServer(device, state_port=0, cmd_port=0, rate_hz=100.0)
+    server.bind()
+    shutdown = threading.Event()
+    t = threading.Thread(target=server.run, args=(shutdown,), daemon=True)
+    with caplog.at_level("WARNING"):
+        t.start()
+        assert _wait_until(lambda: any("Head/hand cycle took" in r.message for r in caplog.records))
+    shutdown.set()
+    t.join(timeout=2.0)
+    server.stop()

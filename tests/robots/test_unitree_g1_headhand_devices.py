@@ -16,12 +16,14 @@
 
 """Tests for `headhand_devices`: tick/rad conversion and `HeadHandDevice` bus wiring. No hardware."""
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
 
 from lerobot.robots.unitree_g1 import headhand_devices as d
 from lerobot.robots.unitree_g1.end_effectors import AMAZING_HAND_LIMIT_RAD, AMAZING_HAND_MOTORS as HAND_MOTORS
+from lerobot.robots.unitree_g1.hand_force import HandForceLimiter
 from lerobot.robots.unitree_g1.heads import HEAD_LIMITS_RAD, HEAD_MOTORS
 
 
@@ -224,3 +226,110 @@ def test_hands_only_device_serves_the_hand_motors(hand_bus_mock):
 def test_device_needs_a_bus():
     with pytest.raises(ValueError):
         d.HeadHandDevice(None, None)
+
+
+def _limited_device(head_bus_mock, hand_bus_mock, limiter=None, **kwargs):
+    def head_bus_cls(**kw):
+        return head_bus_mock
+
+    def hand_bus_cls(**kw):
+        return hand_bus_mock
+
+    return d.HeadHandDevice(
+        "/dev/head",
+        "/dev/hand",
+        head_bus_cls=head_bus_cls,
+        hand_bus_cls=hand_bus_cls,
+        hand_force=limiter,
+        **kwargs,
+    )
+
+
+def _fake_hand_reads(hand_bus_mock, pos=500, load=0, temp=30):
+    values = {"Present_Position": pos, "Present_Load": load, "Present_Temperature": temp}
+    hand_bus_mock.read.side_effect = lambda reg, name, **kw: values[reg]
+    return values
+
+
+def test_without_limiter_reads_only_positions_and_writes_goals_untouched(head_bus_mock, hand_bus_mock):
+    dev = _limited_device(head_bus_mock, hand_bus_mock)
+    _fake_hand_reads(hand_bus_mock)
+    head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
+    dev.read_ticks()
+    assert {c.args[0] for c in hand_bus_mock.read.call_args_list} == {"Present_Position"}
+    name = next(iter(HAND_MOTORS))
+    dev.write_ticks({name: 900})
+    assert hand_bus_mock.sync_write.call_args.args[1] == {name: 900}
+
+
+def test_limiter_reads_loads_and_temperature_every_n_cycles(head_bus_mock, hand_bus_mock):
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(), temp_every=3)
+    _fake_hand_reads(hand_bus_mock)
+    head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
+    counts = []
+    for _ in range(4):
+        hand_bus_mock.read.reset_mock()
+        ticks = dev.read_ticks()
+        regs = [c.args[0] for c in hand_bus_mock.read.call_args_list]
+        counts.append(
+            (regs.count("Present_Position"), regs.count("Present_Load"), regs.count("Present_Temperature"))
+        )
+        assert len(ticks) == 18
+    assert counts == [(16, 16, 16), (16, 16, 0), (16, 16, 0), (16, 16, 16)]
+
+
+def test_limiter_caps_hand_goals_but_not_head_goals(head_bus_mock, hand_bus_mock):
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter())
+    _fake_hand_reads(hand_bus_mock, pos=500)
+    head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
+    dev.read_ticks()
+    head_name, hand_name = next(iter(HEAD_MOTORS)), next(iter(HAND_MOTORS))
+    dev.write_ticks({head_name: 3000, hand_name: 900})
+    assert head_bus_mock.sync_write.call_args.args[1] == {head_name: 3000}
+    assert hand_bus_mock.sync_write.call_args.args[1] == {hand_name: 530}
+
+
+def test_limiter_overload_logs_warning_and_backs_off(head_bus_mock, hand_bus_mock, caplog, monkeypatch):
+    clock = iter(range(1000))
+    monkeypatch.setattr(d.time, "monotonic", lambda: next(clock) * 0.1)
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter())
+    _fake_hand_reads(hand_bus_mock, pos=500, load=800)
+    head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
+    dev.read_ticks()
+    name = next(iter(HAND_MOTORS))
+    with caplog.at_level(logging.INFO):
+        goals = [
+            dev.write_ticks({name: 900}) or hand_bus_mock.sync_write.call_args.args[1][name] for _ in range(5)
+        ]
+    assert goals[-1] == 485
+    assert any(r.levelno == logging.WARNING and "backing off" in r.message for r in caplog.records)
+
+
+def test_limiter_temperature_torque_off_and_back_on(head_bus_mock, hand_bus_mock):
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(), temp_every=1)
+    values = _fake_hand_reads(hand_bus_mock, pos=500, temp=70)
+    head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
+    dev.set_torque(True)
+    hand_bus_mock.enable_torque.reset_mock()
+    dev.read_ticks()
+    name = next(iter(HAND_MOTORS))
+    dev.write_ticks({name: 900})
+    hand_bus_mock.disable_torque.assert_called_once_with(name)
+    hand_bus_mock.sync_write.assert_not_called()
+
+    dev.set_torque(True)
+    assert name not in hand_bus_mock.enable_torque.call_args.args[0]
+
+    values["Present_Temperature"] = 50
+    dev.read_ticks()
+    dev.write_ticks({name: 900})
+    hand_bus_mock.enable_torque.assert_called_with(name)
+    assert hand_bus_mock.sync_write.call_args.args[1] == {name: 530}
+
+
+def test_read_hand_feedback_returns_pos_load_temp(head_bus_mock, hand_bus_mock):
+    dev = _limited_device(head_bus_mock, hand_bus_mock)
+    _fake_hand_reads(hand_bus_mock, pos=512, load=1024 | 40, temp=33)
+    feedback = dev.read_hand_feedback()
+    assert set(feedback) == set(HAND_MOTORS)
+    assert feedback[next(iter(HAND_MOTORS))] == (512, -40, 33)

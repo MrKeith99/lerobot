@@ -24,6 +24,7 @@ does not match any of `MotorNormMode`'s built-in modes.
 from __future__ import annotations
 
 import argparse
+import logging
 import math
 import threading
 import time
@@ -32,7 +33,12 @@ from collections.abc import Mapping
 from lerobot.motors.motors_bus import Motor, MotorCalibration, MotorNormMode
 
 from .end_effectors import AMAZING_HAND_LIMIT_RAD, AMAZING_HAND_MOTORS as HAND_MOTORS
+from .hand_force import HandForceLimiter, decode_scs_load
 from .heads import HEAD_LIMITS_RAD, HEAD_MOTORS
+
+logger = logging.getLogger(__name__)
+
+MAX_LIMITER_DT_S = 0.1
 
 TICKS_PER_RAD: dict[str, float] = {
     "xl330-m288": 4096 / (2 * math.pi),
@@ -118,6 +124,8 @@ class HeadHandDevice:
         *,
         head_bus_cls=None,
         hand_bus_cls=None,
+        hand_force: HandForceLimiter | None = None,
+        temp_every: int = 25,
     ) -> None:
         if head_port is None and hand_port is None:
             raise ValueError("HeadHandDevice needs a head port, a hand port or both")
@@ -141,6 +149,15 @@ class HeadHandDevice:
         motors = {**(HEAD_MOTORS if self.head_bus else {}), **(HAND_MOTORS if self.hand_bus else {})}
         self.models: dict[str, str] = {name: model for name, (_, model) in motors.items()}
         self._lock = threading.Lock()
+        self.hand_force = hand_force if self.hand_bus is not None else None
+        self.temp_every = max(1, temp_every)
+        self._read_cycles = 0
+        self._last_write_t: float | None = None
+        self._hand_present: dict[str, int] = {}
+        self._hand_load: dict[str, int] = {}
+        self._hand_temp: dict[str, int] = {}
+        self._hand_torque_off: set[str] = set()
+        self._torque_on = False
 
     @property
     def _buses(self) -> list:
@@ -167,8 +184,13 @@ class HeadHandDevice:
 
     def set_torque(self, enabled: bool) -> None:
         with self._lock:
+            self._torque_on = enabled
             for bus in self._buses:
-                if enabled:
+                if enabled and bus is self.hand_bus and self._hand_torque_off:
+                    allowed = [name for name in HAND_MOTORS if name not in self._hand_torque_off]
+                    if allowed:
+                        bus.enable_torque(allowed)
+                elif enabled:
                     bus.enable_torque()
                 else:
                     bus.disable_torque()
@@ -180,11 +202,41 @@ class HeadHandDevice:
                 positions = self.head_bus.sync_read("Present_Position", normalize=False)
                 ticks.update((name, int(value)) for name, value in positions.items())
             if self.hand_bus is not None:
-                for name in HAND_MOTORS:
-                    ticks[name] = int(
-                        self.hand_bus.read("Present_Position", name, normalize=False, num_retry=1)
-                    )
+                if self.hand_force is None:
+                    for name in HAND_MOTORS:
+                        ticks[name] = int(
+                            self.hand_bus.read("Present_Position", name, normalize=False, num_retry=1)
+                        )
+                else:
+                    with_temp = self._read_cycles % self.temp_every == 0
+                    self._read_cycles += 1
+                    ticks.update(self._read_hand_feedback(with_temp))
             return ticks
+
+    def _read_hand_feedback(self, with_temp: bool) -> dict[str, int]:
+        for name in HAND_MOTORS:
+            self._hand_present[name] = int(
+                self.hand_bus.read("Present_Position", name, normalize=False, num_retry=1)
+            )
+            self._hand_load[name] = decode_scs_load(
+                self.hand_bus.read("Present_Load", name, normalize=False, num_retry=1)
+            )
+            if with_temp:
+                self._hand_temp[name] = int(
+                    self.hand_bus.read("Present_Temperature", name, normalize=False, num_retry=1)
+                )
+        return {name: self._hand_present[name] for name in HAND_MOTORS}
+
+    def read_hand_feedback(self) -> dict[str, tuple[int, int, int]]:
+        """Read `(position, signed load per mille, temperature C)` for every hand servo."""
+        with self._lock:
+            if self.hand_bus is None:
+                return {}
+            self._read_hand_feedback(with_temp=True)
+            return {
+                name: (self._hand_present[name], self._hand_load[name], self._hand_temp[name])
+                for name in HAND_MOTORS
+            }
 
     def write_ticks(self, goals: Mapping[str, int]) -> None:
         head_goals: dict[str, int] = {}
@@ -202,8 +254,32 @@ class HeadHandDevice:
         with self._lock:
             if head_goals:
                 self.head_bus.sync_write("Goal_Position", head_goals, normalize=False)
+            if hand_goals and self.hand_force is not None:
+                hand_goals = self._limit_hand_goals(hand_goals)
             if hand_goals:
                 self.hand_bus.sync_write("Goal_Position", hand_goals, normalize=False)
+
+    def _limit_hand_goals(self, hand_goals: dict[str, int]) -> dict[str, int]:
+        now = time.monotonic()
+        dt = 0.0 if self._last_write_t is None else min(now - self._last_write_t, MAX_LIMITER_DT_S)
+        self._last_write_t = now
+        limited, torque_off, events = self.hand_force.limit(
+            hand_goals, self._hand_present, self._hand_load, self._hand_temp, dt
+        )
+        for event in events:
+            if "released" in event:
+                logger.info("Hand force: %s", event)
+            else:
+                logger.warning("Hand force: %s", event)
+        for name, off in torque_off.items():
+            if off and name not in self._hand_torque_off:
+                self._hand_torque_off.add(name)
+                self.hand_bus.disable_torque(name)
+            elif not off and name in self._hand_torque_off:
+                self._hand_torque_off.discard(name)
+                if self._torque_on:
+                    self.hand_bus.enable_torque(name)
+        return {name: tick for name, tick in limited.items() if name not in self._hand_torque_off}
 
     def ping_all(self) -> dict[str, int | None]:
         results: dict[str, int | None] = {}
@@ -225,7 +301,7 @@ class HeadHandDevice:
 
 def _cli() -> None:
     parser = argparse.ArgumentParser(description="Unitree G1 head/hand device utility")
-    parser.add_argument("command", choices=["scan", "read", "torque-off"])
+    parser.add_argument("command", choices=["scan", "read", "loads", "torque-off"])
     parser.add_argument("--head-port", default=DEFAULT_HEAD_PORT)
     parser.add_argument("--hand-port", default=DEFAULT_HAND_PORT)
     parser.add_argument("--no-head", action="store_true", help="Skip the head bus")
@@ -247,6 +323,15 @@ def _cli() -> None:
                 if not args.loop:
                     break
                 time.sleep(0.1)
+        elif args.command == "loads":
+            while True:
+                feedback = device.read_hand_feedback()
+                print(f"{'servo':<20}{'pos':>6}{'load':>7}{'temp_C':>8}")
+                for name, (pos, load, temp) in feedback.items():
+                    print(f"{name:<20}{pos:>6}{load:>7}{temp:>8}")
+                if not args.loop:
+                    break
+                time.sleep(0.2)
         elif args.command == "torque-off":
             device.set_torque(False)
     finally:

@@ -430,6 +430,24 @@ python src/lerobot/robots/unitree_g1/run_g1_server.py \
   power-cycle).
 </Tip>
 
+### Force limiting
+
+The AmazingHand servos (SCS0009) have no RAM torque-limit register, so the head/hand bridge limits
+force in software, per servo, so that closing on an object or a stall does not break the printed
+parts or the servos. Each hand goal is kept within `--hand-max-err-ticks` of the present position
+(bounding the P-controller force in both directions). A servo whose `Present_Load` stays above
+`--hand-load-limit` (per mille) for `--hand-overload-s` seconds backs off by `--hand-backoff-ticks`
+away from where it was pushing and holds there until the operator opens the hand. A servo at or above
+`--hand-temp-limit` degrees C is torqued off until it is 5 degrees cooler.
+
+It is on by default with `--headhand` (`--no-hand-force-limit` disables it). Defaults are
+`--hand-max-err-ticks 30`, `--hand-load-limit 500`, `--hand-overload-s 0.3`,
+`--hand-backoff-ticks 15` and `--hand-temp-limit 65`; they are starting points to tune on the
+hardware (`python -m lerobot.robots.unitree_g1.headhand_devices loads [--loop]` prints each servo's
+position, load and temperature). It adds a `Present_Load` read per servo to every cycle: if the
+server logs that a cycle took longer than `1/--headhand-rate`, lower the rate. Nothing is written to
+the servos' EEPROM.
+
 ### Calibrate the head and hands
 
 Only the head/hand bridge motors need calibration (the body and Dex hands report joint angles):
