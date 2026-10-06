@@ -611,8 +611,8 @@ lerobot-teleoperate \
 #### Worlds
 
 `--robot.sim_world` selects the sim's `WORLD` (exported as `UNITREE_G1_MUJOCO_WORLD`); unset keeps the plain
-floor. `pick_cylinder` puts a table in front of the robot with an upright cylinder on it (3 cm radius, 12 cm
-tall, 0.35 m ahead of a standing robot's pelvis and 0.10 m to the right) and adds a fixed `table_view`
+floor. `pick_cylinder` puts a table in front of the robot with an upright cylinder on it (2.5 cm radius, 12 cm
+tall, 0.05 kg, about 0.33 m ahead of a standing robot's pelvis and 0.07 m to the right) and adds a fixed `table_view`
 camera to the sim's image stream, so record it next to `head_camera`. `--robot.sim_world_randomize=0.02`
 (`UNITREE_G1_MUJOCO_WORLD_RANDOMIZE`) jitters the cylinder by up to 2 cm in x and y, and by up to 15 degrees
 of yaw, at the start and at every sim reset; the default is no jitter. `--robot.sim_world_grasp`
@@ -630,8 +630,9 @@ lerobot-record \
   --dataset.repo_id=<user>/g1_sim_pick_cylinder --dataset.single_task="Pick up the cylinder" --dataset.reset_time_s=0
 ```
 
-The AmazingHand model has no collision geometry yet, so its fingers do not press on the cylinder; only
-the arm links collide with it.
+The AmazingHand model has collision capsules on its fingers and a palm box that touch only the world's objects,
+but the physical finger grasp does not hold the cylinder yet (the rigid linkage squeezes instead of complying),
+so leave the grasp mode at `attach` for data collection.
 
 Other sim options still come from `UNITREE_G1_MUJOCO_<OPTION>` environment variables (`ONSCREEN=0`
 for headless, `JOYSTICK_TYPE=dualshock4|xbox|switch`, `HEADHAND_STATE_PORT`, `HEADHAND_CMD_PORT`).
