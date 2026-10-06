@@ -49,6 +49,10 @@ class FakeXR:
     def __init__(self):
         self.frame = XRFrame()
         self.recentered = 0
+        self.rendered = []
+
+    def render(self, image):
+        self.rendered.append(image)
 
     def read(self):
         return self.frame
@@ -285,9 +289,38 @@ def test_hand_tracking_engages_when_tracking_starts(clock):
     assert teleop.engaged
 
 
-def test_pass_through_is_the_only_display_mode_for_now():
-    with pytest.raises(NotImplementedError):
-        UnitreeG1XRTeleopConfig(display_mode="ego")
+def test_unknown_display_mode_is_rejected():
+    with pytest.raises(ValueError, match="display_mode"):
+        UnitreeG1XRTeleopConfig(display_mode="stereo")
+
+
+def test_head_camera_is_rendered_in_the_headset(clock):
+    teleop = make_teleop(clock, display_mode="ego")
+    image = np.zeros((480, 640, 3), np.uint8)
+    teleop.send_feedback({"head_camera": image})
+    teleop.send_feedback(observation() | {"head_camera": image})
+    assert len(teleop.xr.rendered) == 2 and teleop.xr.rendered[0] is image
+
+
+def test_pass_through_renders_nothing(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation() | {"head_camera": np.zeros((4, 4, 3), np.uint8)})
+    assert teleop.xr.rendered == []
+
+
+def test_missing_display_camera_warns_once_and_does_not_raise(clock, caplog):
+    teleop = make_teleop(clock, display_mode="immersive")
+    for _ in range(3):
+        teleop.send_feedback(observation() | {"other": np.zeros((4, 4, 3), np.uint8)})
+    assert teleop.xr.rendered == []
+    warnings = [r for r in caplog.records if "head_camera" in r.getMessage()]
+    assert len(warnings) == 1 and "other" in warnings[0].getMessage()
+
+
+def test_render_errors_never_propagate(clock):
+    teleop = make_teleop(clock, display_mode="ego")
+    teleop.xr.render = lambda image: 1 / 0
+    teleop.send_feedback({"head_camera": np.zeros((4, 4, 3), np.uint8)})
 
 
 @pytest.mark.skipif(

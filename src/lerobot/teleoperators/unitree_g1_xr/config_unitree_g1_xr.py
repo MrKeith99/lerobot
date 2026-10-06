@@ -44,7 +44,11 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     head_mount: str = "pan_tilt"
     head_sensor: str = "d455"
     input_mode: str = "controller"
+    # "pass-through" shows the room; "ego" a small head camera window in it; "immersive" the camera full view.
     display_mode: str = "pass-through"
+    display_camera: str = "head_camera"
+    display_image_shape: tuple[int, int] = (480, 640)
+    display_fps: float = 30.0
     cert_file: str | None = None
     key_file: str | None = None
     # Local sim checkout for the arm kinematics; default: the sim's Hub snapshot (MJCF only).
@@ -68,7 +72,3 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
         ):
             if value not in allowed:
                 raise ValueError(f"Unknown {name} {value!r}; expected one of {allowed}")
-        if self.display_mode != "pass-through":
-            raise NotImplementedError(
-                "The head camera view in the headset is not wired up yet; use pass-through"
-            )

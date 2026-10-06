@@ -196,7 +196,7 @@ unitree_g1 = [
 # numpy<2; install it from the fork's checkout with `pip install -e teleop/televuer --no-deps`.
 unitree_g1_xr = [
     "lerobot[unitree_g1]",
-    "xr_teleoperate @ git+https://github.com/MrKeith99/xr_teleoperate@4f47fff",
+    "xr_teleoperate @ git+https://github.com/MrKeith99/xr_teleoperate@b63beb0",
     "vuer[all]==0.0.60",
     "params-proto<3",  # vuer 0.0.60 uses its 2.x API
     "logging-mp",

@@ -113,6 +113,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._auto_engaged = False
         self._robot_type_checked = False
         self._synced_to_robot = False
+        self._warned_no_camera = False
         self._measured: dict[str, float] = {}
         self._buttons: dict[str, bool] = {}
         self._pending_events: set[str] = set()
@@ -159,6 +160,8 @@ class UnitreeG1XRTeleop(Teleoperator):
             self.xr = XRInput(
                 input_mode=cfg.input_mode,
                 display_mode=cfg.display_mode,
+                image_shape=cfg.display_image_shape,
+                display_fps=cfg.display_fps,
                 cert_file=cfg.cert_file,
                 key_file=cfg.key_file,
             )
@@ -168,6 +171,12 @@ class UnitreeG1XRTeleop(Teleoperator):
         print("  A: engage / disengage (face the robot's forward direction first)   B: stop")
         print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
         print("  Right / left stick click: end episode success / rerecord")
+        if cfg.display_mode == "pass-through":
+            print("  Headset shows pass-through (--teleop.display_mode=ego|immersive for the head camera)")
+        else:
+            print(
+                f"  Headset shows {cfg.display_camera!r} ({cfg.display_mode}); Quest 'Pass-through' button: room view"
+            )
 
     def disconnect(self) -> None:
         if self.xr is not None and hasattr(self.xr, "close"):
@@ -200,9 +209,32 @@ class UnitreeG1XRTeleop(Teleoperator):
                 f"{'has no' if self._head else 'has a'} pan/tilt head"
             )
 
+    def _render_camera(self, feedback: dict[str, Any]) -> None:
+        cfg = self.config
+        if cfg.display_mode == "pass-through" or self.xr is None:
+            return
+        image = feedback.get(cfg.display_camera)
+        if image is None:
+            if not self._warned_no_camera:
+                self._warned_no_camera = True
+                present = sorted(k for k, v in feedback.items() if getattr(v, "ndim", 0) == 3)
+                logger.warning(
+                    f"No {cfg.display_camera!r} image in the robot observation (images: {present}); the "
+                    f"headset shows no camera view. Add the camera with --robot.cameras or set "
+                    f"--teleop.display_camera."
+                )
+            return
+        try:
+            self.xr.render(image)
+        except Exception:
+            if not self._warned_no_camera:
+                self._warned_no_camera = True
+                logger.warning(f"Could not show {cfg.display_camera!r} in the headset", exc_info=True)
+
     def send_feedback(self, feedback: dict[str, Any]) -> None:
         """Check the embodiment, track the measured arm pose and, on the first full observation, hold every
         target at the robot's pose."""
+        self._render_camera(feedback)
         if not all(key in feedback for key in BODY_KEYS):
             return
         self._check_embodiment(feedback)

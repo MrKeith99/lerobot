@@ -529,8 +529,22 @@ the robot's forward direction and press A.
 | Right / left stick click | End episode: success / rerecord                                                   |
 
 Nothing moves until A; the arms then move to your pose at `--teleop.engage_arm_speed_rad_s` (0.5) before following at full speed, and targets hold while tracking is lost. `--teleop.input_mode=hand` uses hand
-tracking (pinch closes the hand; it engages when tracking starts). The headset shows pass-through
-only for now; the head camera view comes next.
+tracking (pinch closes the hand; it engages when tracking starts).
+
+By default the headset shows pass-through (the room). `--teleop.display_mode=ego` shows the robot's head
+camera in a small window with the room around it, `immersive` fills the view; the Quest's "Pass-through"
+button switches back to the room. The frame is `--teleop.display_camera` (default `head_camera`) from the
+robot's cameras, resized to `--teleop.display_image_shape` (480 640) at up to `--teleop.display_fps` (30).
+If the camera is missing a warning lists the image keys present. A sim example with the head camera:
+
+```bash
+lerobot-teleoperate \
+  --robot.type=unitree_g1 --robot.body=23dof --robot.end_effector=amazing_hand --robot.head_mount=pan_tilt --robot.head_sensor=d455 \
+  --robot.is_simulation=true --robot.controller=GrootLocomotionController \
+  --robot.cameras='{"head_camera": {"type":"zmq","server_address":"127.0.0.1","port":5555,"camera_name":"head_camera","width":640,"height":480,"fps":30,"warmup_s":5}}' \
+  --teleop.type=unitree_g1_xr --teleop.body=23dof --teleop.end_effector=amazing_hand --teleop.head_mount=pan_tilt --teleop.head_sensor=d455 \
+  --teleop.display_mode=ego
+```
 
 ### Simulation
 
