@@ -185,8 +185,6 @@ def test_nothing_moves_until_engaged(clock):
 def test_engaging_recenters_and_starts_from_the_measured_arms(clock):
     teleop = make_teleop(clock)
     teleop.send_feedback(observation(**{"kRightElbow.q": 0.4}))
-    press(teleop, clock, "b")
-    assert not teleop.engaged
     press(teleop, clock, "a", tracking=False)
     assert not teleop.engaged, "engaging needs tracking"
     press(teleop, clock, "a")
@@ -209,7 +207,7 @@ def test_arm_targets_follow_the_ik_at_the_speed_limit(clock):
     assert action["kLeftWristPitch.q"] == pytest.approx(0.1), "no 23dof wrist pitch: held"
 
 
-def test_targets_hold_while_tracking_is_lost_and_after_stop(clock):
+def test_targets_hold_while_tracking_is_lost_and_after_disengage(clock):
     teleop = make_teleop(clock)
     teleop.send_feedback(observation())
     teleop.arm_ik.solution[:] = 0.1
@@ -227,7 +225,7 @@ def test_targets_hold_while_tracking_is_lost_and_after_stop(clock):
     )
     moved = step(teleop, clock, XRFrame(tracking=True), n=5)["kLeftElbow.q"]
     assert moved > 0.1
-    press(teleop, clock, "b")
+    press(teleop, clock, "a")
     teleop.arm_ik.solution[:] = -1.0
     assert step(teleop, clock, XRFrame(tracking=True), n=20)["kLeftElbow.q"] == pytest.approx(moved)
     assert not teleop.engaged
@@ -428,10 +426,6 @@ def test_band_toggle_rearms_after_release(clock):
     assert toggles(teleop, clock, grips_frame(), 100).count(1.0) == 1
 
 
-def b_frame(**buttons):
-    return XRFrame(tracking=True, buttons={"b": True, **buttons})
-
-
 def resets(teleop, clock, frame, n):
     return [step(teleop, clock, frame)[SIM_RESET_KEY] for _ in range(n)]
 
@@ -442,74 +436,23 @@ def test_sim_reset_key_is_a_zero_action_feature(clock):
     assert step(teleop, clock, XRFrame())[SIM_RESET_KEY] == 0.0
 
 
-def test_sim_reset_hold_must_be_positive():
-    with pytest.raises(ValueError, match="sim_reset_hold_s"):
-        UnitreeG1XRTeleopConfig(sim_reset_hold_s=0.0)
-
-
-def test_holding_b_while_disengaged_resets_once_after_the_hold_time(clock):
-    teleop = make_teleop(clock)
-    values = resets(teleop, clock, b_frame(), 150)
-    assert values[:98] == [0.0] * 98
-    assert values.count(1.0) == 1
-    assert values.index(1.0) in (98, 99, 100)
-
-
-def test_sim_reset_does_not_fire_before_the_hold_time(clock):
-    teleop = make_teleop(clock, sim_reset_hold_s=3.0)
-    assert resets(teleop, clock, b_frame(), 140) == [0.0] * 140
-
-
-def test_sim_reset_needs_b_held_continuously(clock):
-    teleop = make_teleop(clock)
-    assert resets(teleop, clock, b_frame(), 70) == [0.0] * 70
-    step(teleop, clock, XRFrame(tracking=True))
-    assert resets(teleop, clock, b_frame(), 70) == [0.0] * 70
-
-
-def test_sim_reset_never_fires_while_engaged(clock):
+def test_b_changes_nothing(clock):
     teleop = make_teleop(clock)
     teleop.send_feedback(observation())
+    frame = XRFrame(tracking=True, buttons={"b": True})
+    assert resets(teleop, clock, frame, 200) == [0.0] * 200
     press(teleop, clock, "a")
     assert teleop.engaged
-    assert resets(teleop, clock, b_frame(), 1) == [0.0]
-    assert not teleop.engaged
-
-
-def test_b_that_stops_the_teleop_does_not_start_the_hold(clock):
-    teleop = make_teleop(clock)
-    teleop.send_feedback(observation())
-    press(teleop, clock, "a")
-    assert resets(teleop, clock, b_frame(), 200) == [0.0] * 200
-    assert not teleop.engaged
-    step(teleop, clock, XRFrame(tracking=True))
-    assert resets(teleop, clock, b_frame(), 150).count(1.0) == 1
-
-
-def test_engaging_cancels_a_reset_hold_in_progress(clock):
-    teleop = make_teleop(clock)
-    teleop.send_feedback(observation())
-    assert resets(teleop, clock, b_frame(), 60) == [0.0] * 60
-    assert resets(teleop, clock, b_frame(a=True), 1) == [0.0]
+    assert resets(teleop, clock, frame, 200) == [0.0] * 200
     assert teleop.engaged
-    assert resets(teleop, clock, b_frame(), 1) == [0.0]
-
-
-def test_sim_reset_rearms_after_release(clock):
-    teleop = make_teleop(clock)
-    assert resets(teleop, clock, b_frame(), 150).count(1.0) == 1
-    step(teleop, clock, XRFrame(tracking=True))
-    assert resets(teleop, clock, b_frame(), 150).count(1.0) == 1
 
 
 def test_targets_resync_from_feedback_for_a_second_after_the_reset(clock):
     teleop = make_teleop(clock)
     key = BODY_KEYS[0]
     teleop.send_feedback(observation())
-    assert resets(teleop, clock, b_frame(), 90) == [0.0] * 90
-    while step(teleop, clock, b_frame())[SIM_RESET_KEY] == 0.0:
-        pass
-    assert step(teleop, clock, b_frame())[key] == pytest.approx(0.1)
+    teleop.on_episode_end()
+    assert step(teleop, clock, XRFrame(tracking=True))[SIM_RESET_KEY] == 1.0
 
     teleop.send_feedback(observation(**{key: 0.7}))
     assert step(teleop, clock)[key] == pytest.approx(0.7)
@@ -577,20 +520,13 @@ def test_episode_end_starts_the_resync_window(clock):
     assert step(teleop, clock)[key] == pytest.approx(0.7)
 
 
-def test_episode_end_cancels_grip_and_b_holds(clock):
+def test_episode_end_cancels_the_grip_hold(clock):
     teleop = make_teleop(clock)
     assert toggles(teleop, clock, grips_frame(), 30) == [0.0] * 30
     teleop.on_episode_end()
     assert teleop._grips_held_s == 0.0
     assert step(teleop, clock, grips_frame())[SIM_BAND_TOGGLE_KEY] == 0.0
     assert toggles(teleop, clock, grips_frame(), 30) == [0.0] * 30
-
-    other = make_teleop(clock)
-    assert resets(other, clock, b_frame(), 60) == [0.0] * 60
-    other.on_episode_end()
-    values = resets(other, clock, b_frame(), 150)
-    assert values[0] == 1.0
-    assert values.count(1.0) == 1
 
 
 def test_episode_end_does_nothing_when_the_option_is_off(clock):

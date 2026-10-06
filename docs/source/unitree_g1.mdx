@@ -517,19 +517,17 @@ lerobot-teleoperate \
 Open `https://<host>:8012` in the Quest browser (accept the certificate), enter VR, then stand facing
 the robot's forward direction and press A.
 
-| Quest controllers            | Action                                                                                                                                  |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| A                            | Engage / disengage: recenter on your facing direction, start from the arm pose                                                          |
-| B                            | Stop: hold every target and stop walking until A re-engages                                                                             |
-| Controller poses             | Arm IK targets (`--teleop.max_arm_speed_rad_s`, default 3.0)                                                                            |
-| Headset yaw / pitch          | `kHeadYaw.q` / `kHeadPitch.q` with a pan/tilt head (`--teleop.invert_head_pitch`)                                                       |
-| Triggers                     | Left / right hand closure                                                                                                               |
-| Left stick, right x          | Walk / turn: `kNavVx/Vy/YawRate.cmd`                                                                                                    |
-| X / Y                        | Hold to lower / raise `kBaseHeight.cmd`                                                                                                 |
-| Right stick click            | End the episode (success); during the reset phase, skip the rest of it                                                                  |
-| Left stick click             | Discard and re-record the episode                                                                                                       |
-| Both grips, 1 s (disengaged) | Sim only: attach / release the elastic band (ignored with `--robot.sim_band_toggle_button=null`)                                        |
-| Hold B 2 s (disengaged)      | Sim only: reset the robot to its start pose on the band; release with both grips, then A (ignored with `--robot.sim_reset_button=null`) |
+| Quest controllers            | Action                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| A                            | Engage / disengage: recenter on your facing direction, start from the arm pose; disengaged holds every target, no walking |
+| Controller poses             | Arm IK targets (`--teleop.max_arm_speed_rad_s`, default 3.0)                                                              |
+| Headset yaw / pitch          | `kHeadYaw.q` / `kHeadPitch.q` with a pan/tilt head (`--teleop.invert_head_pitch`)                                         |
+| Triggers                     | Left / right hand closure                                                                                                 |
+| Left stick, right x          | Walk / turn: `kNavVx/Vy/YawRate.cmd`                                                                                      |
+| X / Y                        | Hold to lower / raise `kBaseHeight.cmd`                                                                                   |
+| Right stick click            | End the episode (success); during the reset phase, skip the rest of it                                                    |
+| Left stick click             | Discard and re-record the episode                                                                                         |
+| Both grips, 1 s (disengaged) | Sim only: attach / release the elastic band (ignored with `--robot.sim_band_toggle_button=null`)                          |
 
 With `lerobot-record`, each episode starts only once the operator is ready: in sim the elastic band is
 released (when a locomotion controller is set) and the XR teleoperator is engaged with A. Pass

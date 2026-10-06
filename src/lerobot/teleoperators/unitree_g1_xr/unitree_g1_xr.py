@@ -22,8 +22,7 @@ joints held at the robot's first observed pose), `kHeadYaw/Pitch.q` with a pan/t
 closure plus its joint targets, the navigation command and remote axes, and `kBaseHeight.cmd`.
 
 Controllers: A engages/disengages (recentering on the operator's facing direction and starting from the
-measured arm pose), B stops (hold every target, no walking) until A re-engages, triggers close the
-hands, the left stick walks, the right stick's x turns, X/Y held lower/raise the base, and the
+measured arm pose), triggers close the hands, the left stick walks, the right stick's x turns, X/Y held lower/raise the base, and the
 right/left stick clicks end the episode as success/rerecord. Hand tracking has no buttons: it engages
 once, when tracking first starts. Targets hold while tracking is lost.
 """
@@ -123,9 +122,6 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._last_t: float | None = None
         self._grips_held_s = 0.0
         self._band_toggle_fired = False
-        self._reset_held_s = 0.0
-        self._reset_hold_valid = False
-        self._reset_fired = False
         self._resync_s = 0.0
         self._reset_pending = False
 
@@ -183,11 +179,10 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._last_t = None
         print(f"Unitree G1 XR teleop ({cfg.body}, {cfg.end_effector}, {cfg.head_mount}, {cfg.head_sensor}):")
         print("  Headset browser: https://<this host>:8012 (or https://vuer.ai?ws=wss://<this host>:8012)")
-        print("  A: engage / disengage (face the robot's forward direction first)   B: stop")
+        print("  A: engage / disengage (face the robot's forward direction first)")
         print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
         print("  Right / left stick click: end episode success / rerecord")
         print(f"  Both grips {cfg.band_toggle_hold_s:g} s (disengaged): sim elastic band")
-        print(f"  Hold B {cfg.sim_reset_hold_s:g} s (disengaged): sim reset to start pose on the band")
         if cfg.display_mode == "pass-through":
             print("  Headset shows pass-through (--teleop.display_mode=ego|immersive for the head camera)")
         else:
@@ -341,31 +336,13 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._catching_up = False
         self._grips_held_s = 0.0
         self._band_toggle_fired = False
-        self._reset_held_s = 0.0
-        self._reset_hold_valid = False
-        self._reset_fired = False
         self._reset_pending = True
         logger.info("Episode ended: disengaged, resetting the sim")
 
-    def _sim_reset(self, frame: Any, dt: float, was_engaged: bool, b_pressed: bool) -> float:
-        if self._reset_pending:
-            self._reset_pending = False
-            return self._fire_sim_reset()
-        if not frame.buttons.get("b", False):
-            self._reset_held_s = 0.0
-            self._reset_hold_valid = False
-            self._reset_fired = False
+    def _sim_reset(self) -> float:
+        if not self._reset_pending:
             return 0.0
-        if b_pressed:
-            self._reset_hold_valid = not was_engaged
-        if self._engaged or not self._reset_hold_valid:
-            self._reset_held_s = 0.0
-            return 0.0
-        self._reset_held_s += dt
-        if self._reset_fired or self._reset_held_s < self.config.sim_reset_hold_s:
-            return 0.0
-        self._reset_fired = True
-        logger.info("XR teleop: B held, resetting the sim to its start pose")
+        self._reset_pending = False
         return self._fire_sim_reset()
 
     @check_if_not_connected
@@ -376,12 +353,8 @@ class UnitreeG1XRTeleop(Teleoperator):
 
         frame = self.xr.read()
         pressed = self._pressed(frame.buttons)
-        was_engaged = self._engaged
         self._resync_s = max(self._resync_s - dt, 0.0)
-        if "b" in pressed and self._engaged:
-            self._engaged = False
-            logger.warning("XR teleop stopped (B): holding every target")
-        elif "a" in pressed:
+        if "a" in pressed:
             if self._engaged:
                 self._engaged = False
                 logger.info("XR teleop disengaged")
@@ -426,7 +399,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         nav = nav_from_remote(axes["remote.lx"], axes["remote.ly"], axes["remote.rx"])
         band_toggle = {
             SIM_BAND_TOGGLE_KEY: self._band_toggle(frame, dt),
-            SIM_RESET_KEY: self._sim_reset(frame, dt, was_engaged, "b" in pressed),
+            SIM_RESET_KEY: self._sim_reset(),
         }
         return (
             {key: self._target[key] for key in self.action_features if key in self._target}
