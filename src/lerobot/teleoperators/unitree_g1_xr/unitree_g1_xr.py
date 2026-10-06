@@ -54,6 +54,7 @@ from lerobot.robots.unitree_g1.g1_utils import (
     REMOTE_KEYS,
     ROBOT_TYPE_FEEDBACK_KEY,
     SIM_BAND_TOGGLE_KEY,
+    SIM_RESET_KEY,
     nav_from_remote,
 )
 from lerobot.robots.unitree_g1.heads import DEFAULT_HEAD_Q, HEAD_KEYS, HEAD_LIMITS_RAD
@@ -68,6 +69,7 @@ logger = logging.getLogger(__name__)
 
 _DT_CAP_S = 0.1
 _CAUGHT_UP_RAD = 0.05
+_RESET_RESYNC_S = 1.0
 # GrootLocomotionController's waist raise/lower slots, as in the gamepad teleop.
 _WAIST_RAISE_KEY = "remote.button.0"
 _WAIST_LOWER_KEY = "remote.button.4"
@@ -121,13 +123,19 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._last_t: float | None = None
         self._grips_held_s = 0.0
         self._band_toggle_fired = False
+        self._reset_held_s = 0.0
+        self._reset_hold_valid = False
+        self._reset_fired = False
+        self._resync_s = 0.0
 
     @cached_property
     def action_features(self) -> dict[str, type]:
         keys = BODY_KEYS + (HEAD_KEYS if self._head else ())
         if self.hand_spec is not None:
             keys += HAND_CLOSURE_KEYS + self.hand_spec.joint_keys()
-        return dict.fromkeys(keys + REMOTE_KEYS + NAV_KEYS + (BASE_HEIGHT_KEY, SIM_BAND_TOGGLE_KEY), float)
+        return dict.fromkeys(
+            keys + REMOTE_KEYS + NAV_KEYS + (BASE_HEIGHT_KEY, SIM_BAND_TOGGLE_KEY, SIM_RESET_KEY), float
+        )
 
     @property
     def feedback_features(self) -> dict[str, type]:
@@ -178,6 +186,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
         print("  Right / left stick click: end episode success / rerecord")
         print(f"  Both grips {cfg.band_toggle_hold_s:g} s (disengaged): sim elastic band")
+        print(f"  Hold B {cfg.sim_reset_hold_s:g} s (disengaged): sim reset to start pose on the band")
         if cfg.display_mode == "pass-through":
             print("  Headset shows pass-through (--teleop.display_mode=ego|immersive for the head camera)")
         else:
@@ -246,7 +255,7 @@ class UnitreeG1XRTeleop(Teleoperator):
             return
         self._check_embodiment(feedback)
         self._measured = {key: float(feedback[key]) for key in BODY_KEYS}
-        if self._synced_to_robot:
+        if self._synced_to_robot and self._resync_s <= 0.0:
             return
         for key in BODY_KEYS + (HEAD_KEYS if self._head else ()):
             self._target[key] = float(feedback[key])
@@ -274,6 +283,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         self.arm_ik.reset(q)
         self._engaged = True
         self._catching_up = True
+        self._resync_s = 0.0
         logger.info("XR teleop engaged")
 
     def _step_arms(self, frame: Any, dt: float) -> None:
@@ -319,6 +329,25 @@ class UnitreeG1XRTeleop(Teleoperator):
         logger.info("XR teleop: both grips held, toggling the sim elastic band")
         return 1.0
 
+    def _sim_reset(self, frame: Any, dt: float, was_engaged: bool, b_pressed: bool) -> float:
+        if not frame.buttons.get("b", False):
+            self._reset_held_s = 0.0
+            self._reset_hold_valid = False
+            self._reset_fired = False
+            return 0.0
+        if b_pressed:
+            self._reset_hold_valid = not was_engaged
+        if self._engaged or not self._reset_hold_valid:
+            self._reset_held_s = 0.0
+            return 0.0
+        self._reset_held_s += dt
+        if self._reset_fired or self._reset_held_s < self.config.sim_reset_hold_s:
+            return 0.0
+        self._reset_fired = True
+        self._resync_s = _RESET_RESYNC_S
+        logger.info("XR teleop: B held, resetting the sim to its start pose")
+        return 1.0
+
     @check_if_not_connected
     def get_action(self) -> RobotAction:
         now = time.perf_counter()
@@ -327,6 +356,8 @@ class UnitreeG1XRTeleop(Teleoperator):
 
         frame = self.xr.read()
         pressed = self._pressed(frame.buttons)
+        was_engaged = self._engaged
+        self._resync_s = max(self._resync_s - dt, 0.0)
         if "b" in pressed and self._engaged:
             self._engaged = False
             logger.warning("XR teleop stopped (B): holding every target")
@@ -373,7 +404,10 @@ class UnitreeG1XRTeleop(Teleoperator):
         buttons[_WAIST_RAISE_KEY] = float(raise_)
         buttons[_WAIST_LOWER_KEY] = float(lower)
         nav = nav_from_remote(axes["remote.lx"], axes["remote.ly"], axes["remote.rx"])
-        band_toggle = {SIM_BAND_TOGGLE_KEY: self._band_toggle(frame, dt)}
+        band_toggle = {
+            SIM_BAND_TOGGLE_KEY: self._band_toggle(frame, dt),
+            SIM_RESET_KEY: self._sim_reset(frame, dt, was_engaged, "b" in pressed),
+        }
         return (
             {key: self._target[key] for key in self.action_features if key in self._target}
             | axes

@@ -41,6 +41,8 @@ GROOT_BASE_HEIGHT_RATE = 0.05  # m/s
 NAV_KEYS = ("kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd")
 # Teleop request (1.0 for one action) to toggle the sim's elastic band; never recorded.
 SIM_BAND_TOGGLE_KEY = "sim.band_toggle"
+# Teleop request (1.0 for one action) to reset the sim to its start pose on the band; never recorded.
+SIM_RESET_KEY = "sim.reset"
 # Feedback entry the record/teleoperate scripts add to a G1 observation for the teleoperator: the robot's
 # `robot_type`, e.g. for an XR teleop to refuse a robot of another embodiment.
 ROBOT_TYPE_FEEDBACK_KEY = "robot_type"

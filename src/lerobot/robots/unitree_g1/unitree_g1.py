@@ -44,6 +44,7 @@ from .g1_utils import (
     NAV_KEYS,
     REMOTE_KEYS,
     SIM_BAND_TOGGLE_KEY,
+    SIM_RESET_KEY,
     G1_29_JointArmIndex,
     G1_29_JointIndex,
     default_remote_input,
@@ -222,6 +223,8 @@ class UnitreeG1(Robot):
         self._band_button_was_pressed = False
         self._band_toggle_requested = False
         self._band_toggle_was_requested = False
+        self._reset_requested = False
+        self._reset_was_requested = False
         self._reset_button_was_pressed = False
         self._band_was_attached = False
 
@@ -264,17 +267,37 @@ class UnitreeG1(Robot):
             self._band_toggle_requested = True
         self._band_toggle_was_requested = requested
 
+    def _request_sim_reset(self, action: RobotAction) -> None:
+        requested = float(action.get(SIM_RESET_KEY, 0.0)) > 0.5
+        enabled = self.config.is_simulation and self.config.sim_reset_button is not None
+        if requested and not self._reset_was_requested and enabled:
+            self._reset_requested = True
+        self._reset_was_requested = requested
+
+    def _reset_sim(self, band) -> None:
+        # Runs on the sim-stepping thread, so MuJoCo state is never modified mid-step
+        band.enable = True
+        band.length = 0
+        self.sim_env.reset()
+        # Legs go limp right away; the controller loop keeps the policy off until the band is released
+        self._make_sim_legs_limp()
+        logger.info("Simulation reset: robot back at start pose with elastic band attached")
+
     def _poll_sim_gamepad_buttons(self):
         """Sim-only gamepad shortcuts: toggle the elastic band (same as "9" in the MuJoCo viewer) and reset."""
         sim = getattr(getattr(self.sim_env, "simulator", None), "sim_env", None)
         joystick = getattr(getattr(sim, "unitree_bridge", None), "joystick", None)
         band = getattr(sim, "elastic_band", None)
         toggle_requested, self._band_toggle_requested = self._band_toggle_requested, False
+        reset_requested, self._reset_requested = self._reset_requested, False
         if band is None:
             return
 
         if toggle_requested:
             self._toggle_sim_band(band)
+
+        if reset_requested:
+            self._reset_sim(band)
 
         if joystick is None:
             return
@@ -291,13 +314,7 @@ class UnitreeG1(Robot):
             self._toggle_sim_band(band)
 
         if just_pressed(self.config.sim_reset_button, "_reset_button_was_pressed"):
-            # Runs on the sim-stepping thread, so MuJoCo state is never modified mid-step
-            band.enable = True
-            band.length = 0
-            self.sim_env.reset()
-            # Legs go limp right away; the controller loop keeps the policy off until the band is released
-            self._make_sim_legs_limp()
-            logger.info("Simulation reset: robot back at start pose with elastic band attached")
+            self._reset_sim(band)
 
     def _subscribe_lowstate(self):  # polls robot state @ 250Hz
         while not self._shutdown_event.is_set():
@@ -750,6 +767,8 @@ class UnitreeG1(Robot):
         action = dict(action)
         self._request_sim_band_toggle(action)
         action.pop(SIM_BAND_TOGGLE_KEY, None)
+        self._request_sim_reset(action)
+        action.pop(SIM_RESET_KEY, None)
         sent: dict[str, float] = {}
 
         hand_targets: dict[str, float] = {}

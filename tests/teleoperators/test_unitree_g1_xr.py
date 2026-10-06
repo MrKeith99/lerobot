@@ -30,6 +30,7 @@ from lerobot.robots.unitree_g1.g1_utils import (  # noqa: E402
     GROOT_BASE_HEIGHT_DEFAULT,
     ROBOT_TYPE_FEEDBACK_KEY,
     SIM_BAND_TOGGLE_KEY,
+    SIM_RESET_KEY,
 )
 from lerobot.robots.unitree_g1.heads import HEAD_KEYS  # noqa: E402
 from lerobot.teleoperators.unitree_g1_xr import (  # noqa: E402
@@ -425,6 +426,108 @@ def test_band_toggle_rearms_after_release(clock):
     assert toggles(teleop, clock, grips_frame(), 100).count(1.0) == 1
     step(teleop, clock, XRFrame(tracking=True))
     assert toggles(teleop, clock, grips_frame(), 100).count(1.0) == 1
+
+
+def b_frame(**buttons):
+    return XRFrame(tracking=True, buttons={"b": True, **buttons})
+
+
+def resets(teleop, clock, frame, n):
+    return [step(teleop, clock, frame)[SIM_RESET_KEY] for _ in range(n)]
+
+
+def test_sim_reset_key_is_a_zero_action_feature(clock):
+    teleop = make_teleop(clock)
+    assert SIM_RESET_KEY in teleop.action_features
+    assert step(teleop, clock, XRFrame())[SIM_RESET_KEY] == 0.0
+
+
+def test_sim_reset_hold_must_be_positive():
+    with pytest.raises(ValueError, match="sim_reset_hold_s"):
+        UnitreeG1XRTeleopConfig(sim_reset_hold_s=0.0)
+
+
+def test_holding_b_while_disengaged_resets_once_after_the_hold_time(clock):
+    teleop = make_teleop(clock)
+    values = resets(teleop, clock, b_frame(), 150)
+    assert values[:98] == [0.0] * 98
+    assert values.count(1.0) == 1
+    assert values.index(1.0) in (98, 99, 100)
+
+
+def test_sim_reset_does_not_fire_before_the_hold_time(clock):
+    teleop = make_teleop(clock, sim_reset_hold_s=3.0)
+    assert resets(teleop, clock, b_frame(), 140) == [0.0] * 140
+
+
+def test_sim_reset_needs_b_held_continuously(clock):
+    teleop = make_teleop(clock)
+    assert resets(teleop, clock, b_frame(), 70) == [0.0] * 70
+    step(teleop, clock, XRFrame(tracking=True))
+    assert resets(teleop, clock, b_frame(), 70) == [0.0] * 70
+
+
+def test_sim_reset_never_fires_while_engaged(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    assert teleop.engaged
+    assert resets(teleop, clock, b_frame(), 1) == [0.0]
+    assert not teleop.engaged
+
+
+def test_b_that_stops_the_teleop_does_not_start_the_hold(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    assert resets(teleop, clock, b_frame(), 200) == [0.0] * 200
+    assert not teleop.engaged
+    step(teleop, clock, XRFrame(tracking=True))
+    assert resets(teleop, clock, b_frame(), 150).count(1.0) == 1
+
+
+def test_engaging_cancels_a_reset_hold_in_progress(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    assert resets(teleop, clock, b_frame(), 60) == [0.0] * 60
+    assert resets(teleop, clock, b_frame(a=True), 1) == [0.0]
+    assert teleop.engaged
+    assert resets(teleop, clock, b_frame(), 1) == [0.0]
+
+
+def test_sim_reset_rearms_after_release(clock):
+    teleop = make_teleop(clock)
+    assert resets(teleop, clock, b_frame(), 150).count(1.0) == 1
+    step(teleop, clock, XRFrame(tracking=True))
+    assert resets(teleop, clock, b_frame(), 150).count(1.0) == 1
+
+
+def test_targets_resync_from_feedback_for_a_second_after_the_reset(clock):
+    teleop = make_teleop(clock)
+    key = BODY_KEYS[0]
+    teleop.send_feedback(observation())
+    assert resets(teleop, clock, b_frame(), 90) == [0.0] * 90
+    while step(teleop, clock, b_frame())[SIM_RESET_KEY] == 0.0:
+        pass
+    assert step(teleop, clock, b_frame())[key] == pytest.approx(0.1)
+
+    teleop.send_feedback(observation(**{key: 0.7}))
+    assert step(teleop, clock)[key] == pytest.approx(0.7)
+    step(teleop, clock, n=40)
+    teleop.send_feedback(observation(**{key: 0.4}))
+    assert step(teleop, clock)[key] == pytest.approx(0.4)
+
+    step(teleop, clock, n=60)
+    teleop.send_feedback(observation(**{key: -0.3}))
+    assert step(teleop, clock)[key] == pytest.approx(0.4)
+
+
+def test_no_resync_without_a_reset(clock):
+    teleop = make_teleop(clock)
+    key = BODY_KEYS[0]
+    teleop.send_feedback(observation())
+    teleop.send_feedback(observation(**{key: 0.7}))
+    assert step(teleop, clock)[key] == pytest.approx(0.1)
 
 
 def test_ready_to_record_follows_engagement(clock):
