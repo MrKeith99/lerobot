@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Iterator, Mapping
@@ -122,6 +123,11 @@ class G1_29_LowState:  # noqa: N801
     mode_machine: int = 0  # Robot mode
 
 
+def _arm_joint_name(slot_name: str) -> str:
+    """MJCF joint name of an SDK arm slot, e.g. kLeftShoulderPitch -> left_shoulder_pitch_joint."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", slot_name.removeprefix("k")).lower() + "_joint"
+
+
 @contextlib.contextmanager
 def _env_vars(values: Mapping[str, str]) -> Iterator[None]:
     """Temporarily set environment variables."""
@@ -212,7 +218,9 @@ class UnitreeG1(Robot):
         self._shutdown_event = threading.Event()
         self.subscribe_thread = None
 
-        self.arm_ik = G1_29_ArmIK() if config.gravity_compensation else None
+        # Gravity model, built in connect() (the sim's MJCF is only known once the env is loaded).
+        self.arm_ik = None
+        self._gravity_slots: list[int] | None = None  # motor slot of each model joint (composed model only)
 
         # Lower-body controller loaded dynamically
         self.controller: LocomotionController | None = make_locomotion_controller(config.controller)
@@ -664,6 +672,9 @@ class UnitreeG1(Robot):
         else:
             self._ChannelFactoryInitialize(0, config=self.config)
 
+        if self.config.gravity_compensation:
+            self._build_gravity_model()
+
         # Initialize direct motor control interface
         self.lowcmd_publisher = self._ChannelPublisher(kTopicLowCommand_Debug, hg_LowCmd)
         self.lowcmd_publisher.Init()
@@ -914,24 +925,50 @@ class UnitreeG1(Robot):
                 if key.endswith(".q") and key.startswith(arm_prefixes)
             }
 
-        tau = None
-        if self.config.gravity_compensation and self.arm_ik is not None:
-            tau = np.zeros(29, dtype=np.float32)
-            action_np = np.array(
-                [
-                    action_to_publish.get(f"{joint.name}.q", self.msg.motor_cmd[joint.value].q)
-                    for joint in G1_29_JointArmIndex
-                ],
-                dtype=np.float32,
-            )
-            arm_tau = self.arm_ik.solve_tau(action_np)
-            arm_start_idx = G1_29_JointArmIndex.kLeftShoulderPitch.value
-            for joint in G1_29_JointArmIndex:
-                local_idx = joint.value - arm_start_idx
-                tau[joint.value] = arm_tau[local_idx]
-
+        tau = self._gravity_tau(action_to_publish) if self.config.gravity_compensation else None
         self.publish_lowcmd(action_to_publish, tau=tau)
         return action
+
+    def _sim_model_root(self) -> Path | None:
+        """Root of the sim repo the loaded env runs (so the gravity model matches it); None for the default."""
+        env_file = getattr(getattr(type(self.sim_env), "reset", None), "__code__", None)
+        if env_file is None:
+            return None
+        root = Path(env_file.co_filename).parent
+        return root if (root / "sim" / "mjcf" / "compose.py").is_file() else None
+
+    def _build_gravity_model(self) -> None:
+        """Arm gravity model of this body and end effector; the upstream 29dof/Dex3 one if xr_teleoperate is missing."""
+        try:
+            from xr_teleoperate.core import G1ArmIK
+        except ImportError:
+            logger.warning(
+                "xr_teleoperate is not installed: gravity compensation uses the upstream 29dof/Dex3 model"
+            )
+            self.arm_ik = G1_29_ArmIK()
+            self._gravity_slots = None
+            return
+        cfg = self.config
+        self.arm_ik = G1ArmIK(cfg.body, cfg.end_effector, sim_root=self._sim_model_root())
+        by_name = {_arm_joint_name(joint.name): joint.value for joint in G1_29_JointArmIndex}
+        self._gravity_slots = [by_name[name] for name in self.arm_ik.joint_names]
+
+    def _gravity_tau(self, action: RobotAction) -> np.ndarray:
+        """Per-slot feed-forward torque holding the commanded arm pose against gravity (0 on absent joints)."""
+        tau = np.zeros(29, dtype=np.float32)
+
+        def commanded(joint) -> float:
+            return action.get(f"{joint.name}.q", self.msg.motor_cmd[joint.value].q)
+
+        if self._gravity_slots is None:  # upstream model: all 7 arm joints per side
+            q = np.array([commanded(joint) for joint in G1_29_JointArmIndex], dtype=np.float32)
+            for joint, value in zip(G1_29_JointArmIndex, self.arm_ik.solve_tau(q), strict=True):
+                tau[joint.value] = value
+            return tau
+        joints = [G1_29_JointIndex(slot) for slot in self._gravity_slots]
+        q = np.array([commanded(joint) for joint in joints], dtype=float)
+        tau[self._gravity_slots] = self.arm_ik.gravity_torques(q)
+        return tau
 
     def _update_controller_action(self, action: RobotAction) -> None:
         """Update controller input state from incoming teleop action."""
@@ -973,6 +1010,7 @@ class UnitreeG1(Robot):
             "sim_world": cfg.sim_world,
             "sim_world_grasp": cfg.sim_world_grasp,
             "sim_world_randomize": cfg.sim_world_randomize,
+            "gravity_compensation": cfg.gravity_compensation,
         }
         return info
 

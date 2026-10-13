@@ -962,3 +962,101 @@ def test_provenance_of_real_robot_has_only_lerobot_and_embodiment():
     robot = UnitreeG1.__new__(UnitreeG1)
     robot.config = UnitreeG1Config(is_simulation=False)
     assert set(robot.provenance()) == {"lerobot", "embodiment"}
+
+
+class _FakeGravityIK:
+    """Stand-in for xr_teleoperate's G1ArmIK: gravity torque of joint i is (i + 1) * q_i."""
+
+    def __init__(self, body, end_effector, sim_root=None):
+
+        self.args = (body, end_effector, sim_root)
+        sides = ("left", "right")
+        joints = ("shoulder_pitch", "shoulder_roll", "shoulder_yaw", "elbow", "wrist_roll")
+        if body == "29dof":
+            joints += ("wrist_pitch", "wrist_yaw")
+        self.joint_names = tuple(f"{s}_{j}_joint" for s in sides for j in joints)
+
+    def gravity_torques(self, q):
+        return (np.arange(len(q)) + 1.0) * np.asarray(q)
+
+
+def _gravity_robot(monkeypatch, body, xr_available=True):
+    import sys
+    import types
+
+    core = types.SimpleNamespace(G1ArmIK=_FakeGravityIK) if xr_available else None
+    monkeypatch.setitem(sys.modules, "xr_teleoperate.core", core)
+    with _mocked_unitree_g1(body=body) as (robot, _):
+        robot.config.gravity_compensation = True
+        robot.msg = MagicMock()
+        robot.msg.motor_cmd = [MagicMock(q=0.0) for _ in range(29)]
+        robot._build_gravity_model()
+        yield robot
+
+
+@pytest.fixture
+def gravity_robot_23dof(monkeypatch):
+    yield from _gravity_robot(monkeypatch, "23dof")
+
+
+def test_gravity_torques_map_by_joint_name_with_zero_phantom_slots(gravity_robot_23dof):
+    robot = gravity_robot_23dof
+    assert robot.arm_ik.args[:2] == ("23dof", "rubber_hand")
+    action = {
+        "kLeftShoulderPitch.q": 0.5,
+        "kLeftElbow.q": 1.0,
+        "kLeftWristRoll.q": 2.0,
+        "kRightShoulderPitch.q": 3.0,
+        "kRightWristRoll.q": 4.0,
+    }
+    tau = robot._gravity_tau(action)
+    assert tau.shape == (29,)
+    # model order: left (shoulder_pitch, roll, yaw, elbow, wrist_roll), then right
+    assert tau[G1_29_JointIndex.kLeftShoulderPitch] == pytest.approx(1 * 0.5)
+    assert tau[G1_29_JointIndex.kLeftElbow] == pytest.approx(4 * 1.0)
+    assert tau[G1_29_JointIndex.kLeftWristRoll] == pytest.approx(5 * 2.0)
+    assert tau[G1_29_JointIndex.kRightShoulderPitch] == pytest.approx(6 * 3.0)
+    assert tau[G1_29_JointIndex.kRightWristRoll] == pytest.approx(10 * 4.0)
+    for joint in (
+        G1_29_JointIndex.kLeftWristPitch,
+        G1_29_JointIndex.kLeftWristYaw,
+        G1_29_JointIndex.kRightWristPitch,
+        G1_29_JointIndex.kRightWristYaw,
+    ):
+        assert tau[joint] == 0.0
+    assert not tau[:15].any()  # legs and waist are never fed forward
+
+
+def test_gravity_tau_falls_back_to_last_command_for_missing_joints(gravity_robot_23dof):
+    robot = gravity_robot_23dof
+    robot.msg.motor_cmd[G1_29_JointIndex.kLeftElbow.value].q = 2.0
+    tau = robot._gravity_tau({})
+    assert tau[G1_29_JointIndex.kLeftElbow] == pytest.approx(4 * 2.0)
+
+
+def test_gravity_tau_reaches_publish_lowcmd_for_arms_only(gravity_robot_23dof):
+    robot = gravity_robot_23dof
+    robot.crc = MagicMock()
+    robot.lowcmd_publisher = MagicMock()
+    robot._invalid_slots = frozenset()
+    robot.kp = robot.kd = np.zeros(29)
+    robot._send_body_action({"kLeftElbow.q": 1.0})
+    assert robot.msg.motor_cmd[G1_29_JointIndex.kLeftElbow.value].tau == pytest.approx(4.0)
+
+
+def test_gravity_falls_back_to_upstream_model_without_xr_teleoperate(monkeypatch, caplog):
+    caplog.set_level("WARNING")
+    for robot in _gravity_robot(monkeypatch, "29dof", xr_available=False):
+        assert robot._gravity_slots is None
+        robot.arm_ik.solve_tau.return_value = np.arange(14, dtype=np.float32)  # G1_29_ArmIK is mocked
+        assert "xr_teleoperate is not installed" in caplog.text
+        tau = robot._gravity_tau({})
+        assert tau[G1_29_JointIndex.kLeftShoulderPitch] == 0.0
+        assert tau[G1_29_JointIndex.kRightWristYaw] == 13.0
+
+
+def test_provenance_records_gravity_compensation(unitree_g1):
+    robot, _ = unitree_g1
+    assert robot.provenance()["embodiment"]["gravity_compensation"] is False
+    robot.config.gravity_compensation = True
+    assert robot.provenance()["embodiment"]["gravity_compensation"] is True

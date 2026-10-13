@@ -76,6 +76,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--band-release-s", type=float, default=2.0, help="Seconds after connect to release the band.")
     parser.add_argument("--success-lift", type=float, default=0.05, help="Cylinder lift (m) counting as success.")
     parser.add_argument("--video-out", default=None, help="mp4 path (default outputs/rollouts/<timestamp>.mp4).")
+    parser.add_argument("--no-gravity-compensation", action="store_true", help="Disable the arm gravity feed-forward.")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--ready-timeout", type=float, default=60.0, help="Max seconds to wait for the band release.")
     parser.add_argument("--repo-id", default=None, help="Training dataset (for state/action names); default: from train_config.json.")
@@ -109,6 +110,7 @@ def build_robot(args: argparse.Namespace):
         sim_world=args.world,
         sim_world_randomize=args.randomize,
         sim_world_grasp="physics",
+        gravity_compensation=not args.no_gravity_compensation,
         sim_band_release_s=args.band_release_s,
         cameras={HEAD_CAM: cam(HEAD_CAM), TABLE_CAM: cam(TABLE_CAM)},
     )

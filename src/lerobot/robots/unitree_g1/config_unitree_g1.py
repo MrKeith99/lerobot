@@ -99,7 +99,7 @@ class UnitreeG1Config(RobotConfig):
     # Cameras (ZMQ-based remote cameras)
     cameras: dict[str, CameraConfig] = field(default_factory=dict)
 
-    # Compensates for gravity on the unitree's arms using the arm ik solver
+    # Feed-forward torque holding the commanded arm pose against gravity (xr_teleoperate's model of body and end effector)
     gravity_compensation: bool = False
 
     # Lower-body controller class name, e.g. "GrootLocomotionController" or
