@@ -127,6 +127,11 @@ class UnitreeG1Config(RobotConfig):
     # for policy rollouts without a teleop. None keeps it attached until toggled.
     sim_band_release_s: float | None = None
 
+    # Simulation only: this many seconds after the elastic band is released (by any path), put the floating base
+    # back at its spawn x, y and yaw (height, roll/pitch, joints kept, velocity zeroed), once per release. The
+    # limp-legged drop and recovery steps otherwise leave the robot away from the table. None disables it.
+    sim_replace_after_release_s: float | None = 3.0
+
     # Without a controller: zero the leg gains so the legs hang passive (e.g. on a gantry).
     freeze_legs: bool = False
 
@@ -163,6 +168,10 @@ class UnitreeG1Config(RobotConfig):
             raise ValueError(f"sim_world_grasp must be 'attach' or 'physics', got {self.sim_world_grasp!r}")
         if self.sim_band_release_s is not None and self.sim_band_release_s < 0:
             raise ValueError(f"sim_band_release_s must be >= 0, got {self.sim_band_release_s}")
+        if self.sim_replace_after_release_s is not None and self.sim_replace_after_release_s < 0:
+            raise ValueError(
+                f"sim_replace_after_release_s must be >= 0, got {self.sim_replace_after_release_s}"
+            )
         if self.stand_ramp_s <= 0:
             raise ValueError(f"stand_ramp_s must be > 0, got {self.stand_ramp_s}")
         if self.head_default_positions is None:

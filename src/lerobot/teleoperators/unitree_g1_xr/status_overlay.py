@@ -31,10 +31,10 @@ YELLOW = (255, 220, 0)
 ORANGE = (255, 150, 0)
 
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
-# The ego view is ~0.35x life size in the headset, so the text is big: the first line takes up to 8% of the
-# image height, the others 7%, shrunk to fit the width.
-_MAIN_HEIGHT_FRAC = 0.08
-_SUB_HEIGHT_FRAC = 0.07
+# Sized for the 2x ego window (display_ego_scale=2), where the text is already large: the first line takes up
+# to 5.5% of the image height, the others 4.5%, shrunk to fit the width.
+_MAIN_HEIGHT_FRAC = 0.055
+_SUB_HEIGHT_FRAC = 0.045
 _BANNER_ALPHA = 0.65  # how much the image under the banner is darkened
 
 

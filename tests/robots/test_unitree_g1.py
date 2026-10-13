@@ -1060,3 +1060,156 @@ def test_provenance_records_gravity_compensation(unitree_g1):
     assert robot.provenance()["embodiment"]["gravity_compensation"] is False
     robot.config.gravity_compensation = True
     assert robot.provenance()["embodiment"]["gravity_compensation"] is True
+
+
+# --- Sim re-placement after the band release -------------------------------------------------------------
+
+_BOX_XML = """
+<mujoco>
+  <worldbody>
+    <body name="pelvis" pos="0.5 -0.25 0.8" euler="0 0 30">
+      <freejoint/>
+      <geom type="box" size="0.1 0.1 0.1"/>
+      <body pos="0.2 0 0"><joint name="hinge" type="hinge" axis="0 1 0"/><geom type="sphere" size="0.05"/></body>
+    </body>
+  </worldbody>
+</mujoco>
+"""
+
+
+def _attach_mujoco_sim(robot, band_enabled: bool = True):
+    mujoco = pytest.importorskip("mujoco")
+    band, _ = _attach_fake_sim(robot, set(), band_enabled=band_enabled)
+    model = mujoco.MjModel.from_xml_string(_BOX_XML)
+    data = mujoco.MjData(model)
+    mujoco.mj_resetData(model, data)
+    inner = robot.sim_env.simulator.sim_env
+    inner.mj_model, inner.mj_data = model, data
+    return mujoco, band, model, data
+
+
+def _displace(mujoco, data, yaw=1.2, roll=0.2, pitch=-0.1, z=0.55):
+    quat = np.zeros(4)
+    mujoco.mju_euler2Quat(quat, np.array([roll, pitch, yaw]), "xyz")
+    data.qpos[:3] = [2.0, 1.0, z]
+    data.qpos[3:7] = quat
+    data.qpos[7] = 0.4
+    data.qvel[:] = 0.3
+
+
+def _euler(mujoco, quat):
+    mat = np.zeros(9)
+    mujoco.mju_quat2Mat(mat, quat)
+    mat = mat.reshape(3, 3)
+    return np.array(
+        [np.arctan2(mat[2, 1], mat[2, 2]), -np.arcsin(mat[2, 0]), np.arctan2(mat[1, 0], mat[0, 0])]
+    )
+
+
+def test_sim_replace_config_validation():
+    assert UnitreeG1Config().sim_replace_after_release_s == 3.0
+    assert UnitreeG1Config(sim_replace_after_release_s=None).sim_replace_after_release_s is None
+    with pytest.raises(ValueError, match="sim_replace_after_release_s"):
+        UnitreeG1Config(sim_replace_after_release_s=-0.1)
+
+
+def test_sim_replace_once_after_delay_keeps_height_tilt_joints(unitree_g1, caplog):
+    robot, _ = unitree_g1
+    robot.config.sim_replace_after_release_s = 2.0
+    mujoco, band, model, data = _attach_mujoco_sim(robot)
+    spawn = model.qpos0.copy()
+    _poll_at(robot, 0.0)  # band attached: pending release
+    band.enable = False
+    _poll_at(robot, 10.0)  # release seen, deadline 12.0
+    _displace(mujoco, data)
+    before_rp = _euler(mujoco, data.qpos[3:7])[:2]
+
+    _poll_at(robot, 11.9)
+    assert data.qpos[0] == 2.0
+    with caplog.at_level("INFO"):
+        _poll_at(robot, 12.0)
+    assert np.allclose(data.qpos[:2], spawn[:2])
+    assert data.qpos[2] == pytest.approx(0.55)
+    roll, pitch, yaw = _euler(mujoco, data.qpos[3:7])
+    assert np.allclose([roll, pitch], before_rp, atol=1e-6)
+    assert yaw == pytest.approx(_euler(mujoco, spawn[3:7])[2], abs=1e-6)
+    assert data.qpos[7] == pytest.approx(0.4)
+    assert np.all(data.qvel[:6] == 0.0)
+    assert np.linalg.norm(data.qpos[3:7]) == pytest.approx(1.0)
+    assert "re-placed" in caplog.text
+
+    _displace(mujoco, data)  # second time at the same release: no-op
+    _poll_at(robot, 50.0)
+    assert data.qpos[0] == 2.0
+
+
+def test_sim_replace_again_after_next_release(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.sim_replace_after_release_s = 2.0
+    mujoco, band, model, data = _attach_mujoco_sim(robot)
+    _poll_at(robot, 0.0)
+    band.enable = False
+    _poll_at(robot, 1.0)
+    _poll_at(robot, 3.0)
+    band.enable = True
+    _poll_at(robot, 4.0)
+    band.enable = False
+    _poll_at(robot, 5.0)
+    _displace(mujoco, data)
+    _poll_at(robot, 7.0)
+    assert np.allclose(data.qpos[:2], model.qpos0[:2])
+
+
+def test_sim_replace_cancelled_by_reattach(unitree_g1):
+    robot, _ = unitree_g1
+    mujoco, band, model, data = _attach_mujoco_sim(robot)
+    _poll_at(robot, 0.0)
+    band.enable = False
+    _poll_at(robot, 1.0)
+    _displace(mujoco, data)
+    band.enable = True
+    _poll_at(robot, 2.0)
+    _poll_at(robot, 100.0)  # band still attached: never moved
+    assert data.qpos[0] == 2.0
+    assert robot._replace_deadline is None
+
+
+def test_sim_replace_cancelled_by_sim_reset(unitree_g1):
+    robot, mocks = unitree_g1
+    robot.msg = mocks["lowcmd_default"]
+    mujoco, band, model, data = _attach_mujoco_sim(robot)
+    _poll_at(robot, 0.0)
+    band.enable = False
+    _poll_at(robot, 1.0)
+    assert robot._replace_deadline is not None
+    robot._reset_requested = True
+    _poll_at(robot, 2.0)  # reset re-attaches the band
+    assert band.enable is True
+    assert robot._replace_deadline is None
+    _displace(mujoco, data)
+    _poll_at(robot, 100.0)
+    assert data.qpos[0] == 2.0
+
+
+def test_sim_replace_disabled_with_none(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.sim_replace_after_release_s = None
+    mujoco, band, model, data = _attach_mujoco_sim(robot)
+    _poll_at(robot, 0.0)
+    band.enable = False
+    _poll_at(robot, 1.0)
+    _displace(mujoco, data)
+    _poll_at(robot, 1000.0)
+    assert data.qpos[0] == 2.0
+
+
+def test_sim_replace_noop_on_real_robot(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.is_simulation = False
+    mujoco, band, model, data = _attach_mujoco_sim(robot)
+    robot._update_sim_replace(robot.sim_env.simulator.sim_env, band)
+    band.enable = False
+    _displace(mujoco, data)
+    with patch("lerobot.robots.unitree_g1.unitree_g1.time.monotonic", return_value=1000.0):
+        robot._update_sim_replace(robot.sim_env.simulator.sim_env, band)
+    assert data.qpos[0] == 2.0

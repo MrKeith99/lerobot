@@ -238,6 +238,9 @@ class UnitreeG1(Robot):
         self._reset_button_was_pressed = False
         self._band_was_attached = False
         self._band_release_deadline: float | None = None
+        # Sim re-placement after a band release: `pending` = band seen attached, waiting for its release
+        self._replace_pending = False
+        self._replace_deadline: float | None = None
         self._locomotion_enabled = False
         self._locomotion_toggle_requested = False
         self._locomotion_toggle_was_requested = False
@@ -317,10 +320,70 @@ class UnitreeG1(Robot):
         band.enable = True
         band.length = 0
         self.sim_env.reset()
+        self._cancel_sim_replace()
         self._arm_sim_band_release()
         # Legs go limp right away; the controller loop keeps the policy off until the band is released
         self._make_sim_legs_limp()
         logger.info("Simulation reset: robot back at start pose with elastic band attached")
+
+    def _cancel_sim_replace(self) -> None:
+        """Drop a scheduled re-placement; the next band release schedules a new one."""
+        self._replace_pending = True
+        self._replace_deadline = None
+
+    def _update_sim_replace(self, sim, band) -> None:
+        """Schedule, cancel or run the post-release re-placement. Runs on the sim-stepping thread."""
+        delay = self.config.sim_replace_after_release_s
+        if delay is None or not self.config.is_simulation:
+            return
+        now = time.monotonic()
+        if band.enable:
+            self._cancel_sim_replace()
+        elif self._replace_pending:
+            self._replace_pending = False
+            self._replace_deadline = now + delay
+        elif self._replace_deadline is not None and now >= self._replace_deadline:
+            self._replace_deadline = None
+            self._replace_sim_base(sim)
+
+    @staticmethod
+    def _replace_sim_base(sim) -> None:
+        """Move the floating base back to its spawn x, y, yaw, keeping height, roll/pitch and joint positions."""
+        try:
+            import mujoco
+        except ImportError:
+            logger.warning("Sim re-placement skipped: mujoco is not importable")
+            return
+        model, data = sim.mj_model, sim.mj_data
+        # The robot's base by name (world objects have free joints too); first free joint as a fallback
+        joint = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "floating_base_joint")
+        if joint < 0:
+            free = np.flatnonzero(np.asarray(model.jnt_type) == int(mujoco.mjtJoint.mjJNT_FREE))
+            if free.size == 0:
+                return
+            joint = int(free[0])
+        qadr, vadr = int(model.jnt_qposadr[joint]), int(model.jnt_dofadr[joint])
+
+        def yaw_of(q) -> float:
+            w, x, y, z = q
+            return float(np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
+
+        spawn = np.asarray(model.qpos0[qadr : qadr + 7], dtype=float)
+        current = np.array(data.qpos[qadr : qadr + 7], dtype=float)
+        dyaw = (yaw_of(spawn[3:7]) - yaw_of(current[3:7]) + np.pi) % (2 * np.pi) - np.pi
+        # World-z rotation by dyaw composed on the left: yaw changes, roll/pitch stay
+        rot_z = np.array([np.cos(dyaw / 2), 0.0, 0.0, np.sin(dyaw / 2)])
+        new_quat = np.zeros(4)
+        mujoco.mju_mulQuat(new_quat, rot_z, current[3:7])
+        new_quat /= np.linalg.norm(new_quat)
+        moved = float(np.hypot(*(spawn[:2] - current[:2])))
+        data.qpos[qadr : qadr + 2] = spawn[:2]
+        data.qpos[qadr + 3 : qadr + 7] = new_quat
+        data.qvel[vadr : vadr + 6] = 0.0
+        mujoco.mj_forward(model, data)
+        logger.info(
+            f"Sim robot re-placed at its start spot: moved {moved:.2f} m, yaw corrected {np.degrees(dyaw):.1f} deg"
+        )
 
     def _poll_sim_gamepad_buttons(self):
         """Sim-only gamepad shortcuts: toggle the elastic band (same as "9" in the MuJoCo viewer) and reset."""
@@ -344,6 +407,8 @@ class UnitreeG1(Robot):
             if band.enable:
                 band.enable = False
                 logger.info("Elastic band released")
+
+        self._update_sim_replace(sim, band)
 
         if joystick is None:
             return
@@ -1010,6 +1075,7 @@ class UnitreeG1(Robot):
             "sim_world": cfg.sim_world,
             "sim_world_grasp": cfg.sim_world_grasp,
             "sim_world_randomize": cfg.sim_world_randomize,
+            "sim_replace_after_release_s": cfg.sim_replace_after_release_s,
             "gravity_compensation": cfg.gravity_compensation,
         }
         return info
@@ -1044,6 +1110,7 @@ class UnitreeG1(Robot):
 
         if self.config.is_simulation and self.sim_env is not None:
             self.sim_env.reset()
+            self._cancel_sim_replace()
             self.publish_lowcmd(
                 {f"{motor.name}.q": float(default_positions[motor.value]) for motor in G1_29_JointIndex}
             )
