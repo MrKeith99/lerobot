@@ -87,10 +87,13 @@ from .configuration_groot import (
     is_raw_groot_n1_7_checkpoint,
 )
 from .utils import (
+    EEF_POSE_DIM,
+    absolute_eef_to_relative_torch,
     as_int_pair,
     as_optional_float,
     as_optional_int,
     config_value,
+    find_eef_blocks,
     flatten_n1_7_modality_stats,
     has_modality_stats,
     infer_n1_7_batch_size_and_device,
@@ -159,6 +162,7 @@ class _GrootN17ActionGroup:
     key: str
     indices: list[int]
     relative: bool
+    eef: bool = False  # relative SE(3) pose block (xyz+rot6d), not a joint-wise difference
 
 
 def _load_n1_7_checkpoint_processor_assets(config: GrootConfig) -> _GrootN17CheckpointProcessorAssets | None:
@@ -879,6 +883,7 @@ def _make_relative_action_training_stats(
     action_names: list[str] | None,
     preserve_action_horizon: bool = True,
     state_permutation: list[int] | None = None,
+    eef_prefixes: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     try:
         dataset_len = len(dataset)
@@ -895,6 +900,9 @@ def _make_relative_action_training_stats(
         enabled=True,
         exclude_joints=list(exclude_joints or []),
         action_names=action_names,
+    )
+    eef_starts = (
+        sorted(find_eef_blocks(list(action_names or []), list(eef_prefixes)).values()) if eef_prefixes else []
     )
     stats = deepcopy(getattr(getattr(dataset, "meta", None), "stats", {}) or {})
     chunks_by_horizon: list[list[np.ndarray]] | None = None
@@ -916,11 +924,15 @@ def _make_relative_action_training_stats(
                     f"({action_batch.shape[0]} vs {state_batch.shape[0]})."
                 )
 
-        relative_action = to_relative_actions(
-            action_batch,
-            state_batch,
-            relative_step._build_mask(action_batch.shape[-1]),
-        )
+        mask = relative_step._build_mask(action_batch.shape[-1])
+        for start in eef_starts:
+            mask[start : start + EEF_POSE_DIM] = [False] * EEF_POSE_DIM
+        relative_action = to_relative_actions(action_batch, state_batch, mask)
+        for start in eef_starts:
+            block = slice(start, start + EEF_POSE_DIM)
+            relative_action[..., block] = absolute_eef_to_relative_torch(
+                action_batch[..., block], state_batch[:, block]
+            )
         if not preserve_action_horizon:
             relative_action = relative_action.reshape(-1, relative_action.shape[-1]).unsqueeze(0)
             pad_mask = None
@@ -974,6 +986,7 @@ def _make_relative_action_training_stats_from_dataset_meta(
     *,
     state_permutation: list[int] | None = None,
     exclude_joints: list[str] | None = None,
+    eef_prefixes: list[str] | None = None,
 ) -> dict[str, dict[str, Any]] | None:
     repo_id = getattr(dataset_meta, "repo_id", None)
     root = getattr(dataset_meta, "root", None)
@@ -1003,6 +1016,7 @@ def _make_relative_action_training_stats_from_dataset_meta(
         action_names=_resolve_action_feature_names_from_dataset_meta(dataset_meta),
         preserve_action_horizon=True,
         state_permutation=state_permutation,
+        eef_prefixes=eef_prefixes if eef_prefixes is not None else list(config.relative_eef_prefixes),
     )
 
 
@@ -1047,11 +1061,13 @@ def _infer_n1_7_action_groups(
     *,
     action_dim: int,
     exclude_joints: list[str],
+    eef_prefixes: list[str] | None = None,
 ) -> list[_GrootN17ActionGroup]:
     if not action_names or action_dim <= 0:
         return []
 
     names = list(action_names[:action_dim])
+    eef_starts = {start: prefix for prefix, start in find_eef_blocks(names, list(eef_prefixes or [])).items()}
     exclude_tokens = [str(token).lower() for token in exclude_joints if token]
     groups: list[_GrootN17ActionGroup] = []
     current_indices: list[int] = []
@@ -1067,7 +1083,16 @@ def _infer_n1_7_action_groups(
         groups.append(_GrootN17ActionGroup(key=key, indices=list(current_indices), relative=True))
         current_indices.clear()
 
+    skip_until = 0
     for index, name in enumerate(names):
+        if index < skip_until:
+            continue
+        if index in eef_starts:
+            flush_relative_group()
+            indices = list(range(index, index + EEF_POSE_DIM))
+            groups.append(_GrootN17ActionGroup(eef_starts[index], indices, relative=True, eef=True))
+            skip_until = index + EEF_POSE_DIM
+            continue
         lowered = str(name).lower()
         is_excluded = any(token == lowered or token in lowered for token in exclude_tokens)
         if is_excluded:
@@ -1127,6 +1152,7 @@ def _build_n1_7_relative_action_processor_assets(
     base_assets: _GrootN17CheckpointProcessorAssets | None = None,
     state_permutation: list[int] | None = None,
     exclude_joints: list[str] | None = None,
+    eef_prefixes: list[str] | None = None,
 ) -> _GrootN17CheckpointProcessorAssets | None:
     if not config.use_relative_actions or not dataset_stats:
         return None
@@ -1146,6 +1172,7 @@ def _build_n1_7_relative_action_processor_assets(
         exclude_joints=list(
             exclude_joints if exclude_joints is not None else config.relative_exclude_joints or []
         ),
+        eef_prefixes=eef_prefixes if eef_prefixes is not None else list(config.relative_eef_prefixes),
     )
     if not groups or not any(group.relative for group in groups):
         return None
@@ -1176,9 +1203,9 @@ def _build_n1_7_relative_action_processor_assets(
     action_configs = [
         {
             "rep": "RELATIVE" if group.relative else "ABSOLUTE",
-            "type": "NON_EEF",
-            "format": "DEFAULT",
-            "state_key": None,
+            "type": "EEF" if group.eef else "NON_EEF",
+            "format": "XYZ_ROT6D" if group.eef else "DEFAULT",
+            "state_key": group.key if group.eef else None,
         }
         for group in groups
     ]
@@ -1322,6 +1349,11 @@ def make_groot_pre_post_processors(
                 "(e.g. nvidia/GR00T-N1.7-3B with embodiment_tag='new_embodiment')."
             )
         state_permutation, relative_exclude = _name_pairing_plan_from_dataset_meta(config, dataset_meta)
+        if config.relative_eef_prefixes:
+            find_eef_blocks(
+                _resolve_action_feature_names_from_dataset_meta(dataset_meta) or [],
+                list(config.relative_eef_prefixes),
+            )
     if config.use_relative_actions and not checkpoint_has_stats:
         relative_dataset_stats = dataset_stats
         if not _stats_preserve_action_horizon(relative_dataset_stats):
@@ -1875,7 +1907,8 @@ class GrootN17PackInputsStep(ProcessorStep):
             )
             if config_value(cfg.get("rep")) == "relative":
                 action_type = config_value(cfg.get("type"))
-                if action_type != "non_eef":
+                is_eef_pose = action_type == "eef" and config_value(cfg.get("format")) == "xyz+rot6d"
+                if action_type != "non_eef" and not is_eef_pose:
                     raise ValueError(f"Unsupported relative N1.7 action config for '{key}': {cfg}")
                 state_key = cfg.get("state_key") or key
                 reference = state_groups.get(state_key)
@@ -1889,7 +1922,14 @@ class GrootN17PackInputsStep(ProcessorStep):
                 if not cloned:
                     converted = action.clone()
                     cloned = True
-                converted[..., start_idx:end_idx] -= reference[:, None, :]
+                if is_eef_pose:
+                    if dim != EEF_POSE_DIM:
+                        raise ValueError(f"EEF pose action group '{key}' must have {EEF_POSE_DIM} dims.")
+                    converted[..., start_idx:end_idx] = absolute_eef_to_relative_torch(
+                        action[..., start_idx:end_idx], reference
+                    )
+                else:
+                    converted[..., start_idx:end_idx] -= reference[:, None, :]
 
             start_idx = end_idx
 

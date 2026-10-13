@@ -335,6 +335,14 @@ class GrootConfig(PreTrainedConfig):
     # keep the gripper absolute, matching the Isaac-GR00T single-arm + absolute-gripper convention.
     relative_exclude_joints: list[str] = field(default_factory=list)
 
+    # End-effector pose blocks that are made relative as SE(3) poses (Isaac-GR00T EEF / xyz+rot6d) instead
+    # of joint-wise differences, e.g. ["kLeftEef", "kRightEef"]. For each prefix the action (and
+    # observation.state) features must contain the 9 contiguous columns "<prefix>.x", ".y", ".z", ".r0" ..
+    # ".r5" (xyz in metres, then rows 0 and 1 of the rotation matrix). The training target is
+    # inv(T_state) @ T_action per chunk step, decoded at inference as T_state @ T_rel. Requires
+    # use_relative_actions=True and relative_action_pairing="name"; must not match relative_exclude_joints.
+    relative_eef_prefixes: list[str] = field(default_factory=list)
+
     # How relative actions find their reference state: "index" pairs action column i with state column i;
     # "name" pairs each action with the same-named state feature, and unmatched actions stay absolute.
     relative_action_pairing: str = "index"
@@ -445,6 +453,23 @@ class GrootConfig(PreTrainedConfig):
             raise ValueError(
                 f"relative_action_pairing must be 'index' or 'name', got {self.relative_action_pairing!r}"
             )
+        if self.relative_eef_prefixes:
+            if not self.use_relative_actions or self.relative_action_pairing != "name":
+                raise ValueError(
+                    "relative_eef_prefixes requires use_relative_actions=True and "
+                    "relative_action_pairing='name'."
+                )
+            if len(set(self.relative_eef_prefixes)) != len(self.relative_eef_prefixes):
+                raise ValueError(f"relative_eef_prefixes has duplicates: {self.relative_eef_prefixes}.")
+            tokens = [str(t).lower() for t in self.relative_exclude_joints if t]
+            for prefix in self.relative_eef_prefixes:
+                for suffix in ("x", "y", "z", "r0", "r1", "r2", "r3", "r4", "r5"):
+                    name = f"{prefix}.{suffix}".lower()
+                    if any(token in name for token in tokens):
+                        raise ValueError(
+                            f"relative_eef_prefixes entry '{prefix}' is also matched by "
+                            f"relative_exclude_joints {self.relative_exclude_joints} (column '{name}')."
+                        )
 
     def validate_features(self) -> None:
         """Validate and set up input/output features for Groot."""

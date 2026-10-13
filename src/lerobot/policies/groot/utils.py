@@ -218,6 +218,62 @@ def relative_eef_to_absolute(action: np.ndarray, reference_state: np.ndarray) ->
     return out.astype(np.float32)
 
 
+EEF_POSE_SUFFIXES = ("x", "y", "z", "r0", "r1", "r2", "r3", "r4", "r5")
+EEF_POSE_DIM = len(EEF_POSE_SUFFIXES)
+
+
+def find_eef_blocks(names: list[str], prefixes: list[str]) -> dict[str, int]:
+    """Locate each ``<prefix>.x .. <prefix>.r5`` block (9 contiguous columns, in order) in `names`.
+
+    Returns {prefix: start index}; raises ValueError for a missing, split or out-of-order block.
+    """
+    blocks: dict[str, int] = {}
+    for prefix in prefixes:
+        expected = [f"{prefix}.{suffix}" for suffix in EEF_POSE_SUFFIXES]
+        present = [name for name in expected if name in names]
+        if not present:
+            raise ValueError(f"relative_eef_prefixes: no '{prefix}.x' ... '{prefix}.r5' columns in {names}.")
+        start = names.index(expected[0]) if expected[0] in names else -1
+        if start < 0 or names[start : start + EEF_POSE_DIM] != expected:
+            raise ValueError(
+                f"relative_eef_prefixes: '{prefix}' needs the {EEF_POSE_DIM} contiguous columns "
+                f"{expected} in that order; found {present} at indices {[names.index(n) for n in present]}."
+            )
+        blocks[prefix] = start
+    return blocks
+
+
+def rot6d_to_matrix_torch(rot6d: torch.Tensor) -> torch.Tensor:
+    """Torch, batched `rot6d_to_matrix`: (..., 6) -> (..., 3, 3), Gram-Schmidt on the two rows."""
+    rows = rot6d.reshape(*rot6d.shape[:-1], 2, 3)
+    row1 = torch.nn.functional.normalize(rows[..., 0, :], dim=-1)
+    row2 = rows[..., 1, :] - (row1 * rows[..., 1, :]).sum(-1, keepdim=True) * row1
+    row2 = torch.nn.functional.normalize(row2, dim=-1)
+    row3 = torch.cross(row1, row2, dim=-1)
+    return torch.stack([row1, row2, row3], dim=-2)
+
+
+def absolute_eef_to_relative_torch(action: torch.Tensor, reference_state: torch.Tensor) -> torch.Tensor:
+    """Inverse of `relative_eef_to_absolute`: encode inv(T_state) @ T_action as xyz+rot6d.
+
+    Args:
+        action: (B, T, 9) or (B, 9) absolute xyz+rot6d poses.
+        reference_state: (B, 9) xyz+rot6d pose at the chunk start.
+    """
+    squeeze = action.ndim == 2
+    if squeeze:
+        action = action.unsqueeze(1)
+    reference_state = reference_state.to(device=action.device, dtype=action.dtype)
+    ref_rot = rot6d_to_matrix_torch(reference_state[..., 3:]).unsqueeze(1)  # (B, 1, 3, 3)
+    act_rot = rot6d_to_matrix_torch(action[..., 3:])  # (B, T, 3, 3)
+    rel_rot = ref_rot.transpose(-1, -2) @ act_rot
+    rel_xyz = (ref_rot.transpose(-1, -2) @ (action[..., :3] - reference_state[:, None, :3]).unsqueeze(-1))[
+        ..., 0
+    ]
+    out = torch.cat([rel_xyz, rel_rot[..., :2, :].reshape(*rel_rot.shape[:-2], 6)], dim=-1)
+    return out[:, 0] if squeeze else out
+
+
 def infer_n1_7_batch_size_and_device(
     obs: dict[str, Any], action: torch.Tensor | None
 ) -> tuple[int, torch.device]:
