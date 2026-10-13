@@ -83,11 +83,11 @@ class UnitreeG1Config(RobotConfig):
     # HF Hub repo id passed to `make_env(..., trust_remote_code=True)` when is_simulation is True
     sim_env_repo_id: str = "k-valentin/unitree-g1-mujoco"
 
-    # Simulation only: the sim's WORLD ("pick_cylinder": a table with a free cylinder and a `table_view`
-    # camera). None keeps the sim's own default, the plain floor.
+    # Simulation only: the sim's WORLD, a world of k-valentin/unitree-g1-mujoco-worlds by name ("pick_cylinder"),
+    # "owner/repo[@rev]:name" or a local folder. None keeps the sim's own default, the plain floor.
     sim_world: str | None = None
     # Simulation only: the sim's WORLD_RANDOMIZE, metres of uniform xy jitter (and +-15 deg yaw) of the
-    # world's objects at start and on every sim reset. None keeps the sim's own default (0).
+    # world's objects at start and on every sim reset. None keeps the world's own default (its world.yaml).
     sim_world_randomize: float | None = None
     # Simulation only: the sim's WORLD_GRASP, "attach" (the object sticks to a hand that closes on it) or
     # "physics" (finger contacts only). None keeps the sim's own default (physics).
