@@ -725,3 +725,65 @@ def test_status_change_rerenders_the_last_image_at_once(clock):
     assert len(teleop.xr.rendered) == count, "elapsed time alone waits for the next frame"
     teleop.on_record_status({"state": "saving"})
     assert len(teleop.xr.rendered) == count + 1
+
+
+def idle_texts(teleop, clock):
+    return [line.text for line in teleop._overlay_lines(clock[0])]
+
+
+def test_idle_banner_ready_when_only_the_engage_is_missing(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status({"state": "idle", "kept": 1, "target": 5, "waiting_for": ["teleop"]})
+    lines = teleop._overlay_lines(clock[0])
+    assert [line.text for line in lines] == ["READY  A: start", "kept 1 / 5"]
+    assert lines[0].color == xr_module.GREEN
+
+
+def test_idle_banner_says_to_release_the_band_when_the_robot_is_not_ready(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status(
+        {"state": "idle", "deletable": 3, "kept": 4, "target": 5, "waiting_for": ["robot", "teleop"]}
+    )
+    lines = teleop._overlay_lines(clock[0])
+    assert lines[0].text == "WAITING" and lines[0].color == xr_module.YELLOW
+    assert "Hold both grips 1 s: release band" in [line.text for line in lines]
+    assert [line.text for line in lines][-2:] == ["B: delete last (ep 3)", "kept 4 / 5"]
+
+
+def test_idle_banner_asks_to_disengage_first_when_engaged_with_the_robot_not_ready(clock):
+    teleop = overlay_teleop(clock)
+    teleop._engaged = True
+    teleop.on_record_status({"state": "idle", "waiting_for": ["robot"]})
+    texts = idle_texts(teleop, clock)
+    assert texts[0] == "WAITING" and texts[1].startswith("A: disengage") and "hold both grips 1 s" in texts[2]
+
+
+def test_idle_banner_back_to_ready_when_the_wait_ends(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status({"state": "idle", "waiting_for": ["robot"]})
+    assert idle_texts(teleop, clock)[0] == "WAITING"
+    teleop.on_record_status({"waiting_for": []})
+    assert idle_texts(teleop, clock)[0] == "READY  A: start"
+
+
+def test_display_ego_scale_defaults_to_one_and_must_be_positive():
+    assert UnitreeG1XRTeleopConfig().display_ego_scale == 1.0
+    for bad in (0, -2.0):
+        with pytest.raises(ValueError, match="display_ego_scale"):
+            UnitreeG1XRTeleopConfig(display_ego_scale=bad)
+
+
+def test_connect_passes_display_ego_scale_to_xr_input(monkeypatch):
+    seen = {}
+
+    class RecordingXR(FakeXR):
+        def __init__(self, **kwargs):
+            super().__init__()
+            seen.update(kwargs)
+
+    monkeypatch.setattr(xr_core, "XRInput", RecordingXR)
+    teleop = UnitreeG1XRTeleop(
+        UnitreeG1XRTeleopConfig(display_mode="ego", display_ego_scale=2.5), arm_ik=FakeIK()
+    )
+    teleop.connect()
+    assert seen["ego_scale"] == 2.5 and seen["display_mode"] == "ego"

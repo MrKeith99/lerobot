@@ -49,6 +49,9 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     display_camera: str = "head_camera"
     display_image_shape: tuple[int, int] = (480, 640)
     display_fps: float = 30.0
+    # Ego window size factor: 1.0 = televuer's 0.75 m tall plane at 2 m (about 0.35x life size), 2.0 = twice as
+    # tall and wide at the same distance. Only used with display_mode="ego".
+    display_ego_scale: float = 1.0
     cert_file: str | None = None
     key_file: str | None = None
     # Local sim checkout for the arm kinematics; default: the sim's Hub snapshot (MJCF only).
@@ -79,6 +82,8 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     status_overlay: bool = True
 
     def __post_init__(self) -> None:
+        if not self.display_ego_scale > 0:
+            raise ValueError(f"display_ego_scale must be > 0, got {self.display_ego_scale}")
         if self.band_toggle_hold_s <= 0:
             raise ValueError(f"band_toggle_hold_s must be > 0, got {self.band_toggle_hold_s}")
         if self.delete_confirm_s <= 0:

@@ -473,32 +473,52 @@ class RecordSession:
         self.status(result={"kind": "deleted", "episode": episode})
 
 
-def components_not_ready(robot, teleop) -> list[str]:
-    """Hints for the robot / teleoperators whose `ready_to_record()` is False; those without it are ready."""
+def _not_ready(robot, teleop) -> list[tuple[str, str]]:
+    """(code, hint) per component whose `ready_to_record()` is False; code is "robot" or "teleop"."""
     missing = []
     ready = getattr(robot, "ready_to_record", None)
     if callable(ready) and not ready():
         missing.append(
-            "robot: start locomotion / release the sim band (Quest: hold both grips 1 s while disengaged; "
-            "sim: gamepad / viewer key 9 also work)"
+            (
+                "robot",
+                "robot: start locomotion / release the sim band (Quest: hold both grips 1 s while disengaged; "
+                "sim: gamepad / viewer key 9 also work)",
+            )
         )
     for t in teleop if isinstance(teleop, list) else [teleop]:
         ready = getattr(t, "ready_to_record", None)
         if callable(ready) and not ready():
-            missing.append(f"{type(t).__name__}: engage the teleoperator (XR: press A)")
+            missing.append(("teleop", f"{type(t).__name__}: engage the teleoperator (XR: press A)"))
     return missing
 
 
+def components_not_ready(robot, teleop) -> list[str]:
+    """Hints for the robot / teleoperators whose `ready_to_record()` is False; those without it are ready."""
+    return [hint for _, hint in _not_ready(robot, teleop)]
+
+
 def wait_until_ready(robot, teleop, events, play_sounds: bool = True, **record_loop_kwargs) -> None:
-    """Teleoperate without recording until robot and teleop are ready or stop is requested."""
-    missing = components_not_ready(robot, teleop)
+    """Teleoperate without recording until robot and teleop are ready or stop is requested.
+
+    While waiting, the teleoperators get `waiting_for` (codes "robot" / "teleop" of what is missing, in
+    `on_record_status`) whenever it changes, and `[]` once the wait is over.
+    """
+    missing = _not_ready(robot, teleop)
     if not missing:
         return
-    logging.info("Waiting for the operator: %s", "; ".join(missing))
+    logging.info("Waiting for the operator: %s", "; ".join(hint for _, hint in missing))
     log_say("Waiting for the operator", play_sounds)
-    while missing and not events["stop_recording"]:
-        record_loop(robot=robot, events=events, teleop=teleop, control_time_s=0.5, **record_loop_kwargs)
-        missing = components_not_ready(robot, teleop)
+    waiting_for = None
+    try:
+        while missing and not events["stop_recording"]:
+            codes = list(dict.fromkeys(code for code, _ in missing))
+            if codes != waiting_for:
+                waiting_for = codes
+                notify_record_status(teleop, waiting_for=codes)
+            record_loop(robot=robot, events=events, teleop=teleop, control_time_s=0.5, **record_loop_kwargs)
+            missing = _not_ready(robot, teleop)
+    finally:
+        notify_record_status(teleop, waiting_for=[])
     events["exit_early"] = False
     events["rerecord_episode"] = False
 

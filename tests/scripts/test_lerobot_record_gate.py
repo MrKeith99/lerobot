@@ -120,3 +120,46 @@ def test_record_notifies_right_after_the_episode_loop_before_the_reset_phase():
     # The episode is saved / discarded before the reset phase so that it can still be deleted there.
     discard = source.index("session.discard()")
     assert episode_loop < notify < discard < reset_phase
+
+
+class Recorder:
+    """Teleop with ready_to_record and on_record_status; records the statuses it gets."""
+
+    def __init__(self, ready_after: int | None = 0):
+        self.ready = Ready(ready_after)
+        self.statuses = []
+
+    def ready_to_record(self):
+        return self.ready.ready_to_record()
+
+    def on_record_status(self, status):
+        self.statuses.append(dict(status))
+
+
+def test_wait_reports_what_is_missing_and_clears_it_at_the_end():
+    robot, teleop = Ready(2), Recorder(1)
+    with patch("lerobot.scripts.lerobot_record.record_loop"):
+        wait_until_ready(robot, teleop, make_events(), play_sounds=False)
+    assert [s["waiting_for"] for s in teleop.statuses] == [["robot", "teleop"], ["robot"], []]
+
+
+def test_wait_reports_only_the_teleop_when_the_robot_is_ready():
+    teleop = Recorder(1)
+    with patch("lerobot.scripts.lerobot_record.record_loop"):
+        wait_until_ready(Plain(), teleop, make_events(), play_sounds=False)
+    assert [s["waiting_for"] for s in teleop.statuses] == [["teleop"], []]
+
+
+def test_wait_clears_waiting_for_on_stop_and_does_not_notify_when_ready():
+    events = make_events()
+    teleop = Recorder(None)
+
+    def stop(**kwargs):
+        events["stop_recording"] = True
+
+    with patch("lerobot.scripts.lerobot_record.record_loop", side_effect=stop):
+        wait_until_ready(Plain(), teleop, events, play_sounds=False)
+    assert teleop.statuses[-1] == {"waiting_for": []}
+    ready = Recorder(0)
+    wait_until_ready(Plain(), ready, make_events(), play_sounds=False)
+    assert ready.statuses == []

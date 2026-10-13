@@ -189,6 +189,7 @@ class UnitreeG1XRTeleop(Teleoperator):
                 display_fps=cfg.display_fps,
                 cert_file=cfg.cert_file,
                 key_file=cfg.key_file,
+                ego_scale=cfg.display_ego_scale,
             )
         self._last_t = None
         print(f"Unitree G1 XR teleop ({cfg.body}, {cfg.end_effector}, {cfg.head_mount}, {cfg.head_sensor}):")
@@ -285,7 +286,8 @@ class UnitreeG1XRTeleop(Teleoperator):
     def on_record_status(self, status: dict[str, Any]) -> None:
         """State from `lerobot-record`: `state` (idle / recording / reset / saving), `episode` (index of the
         running or next one), `kept` / `target` (episodes), `deletable` (index of the last episode saved this
-        session, deletable with B, or None), `elapsed_s` / `episode_time_s` and `result` (`{"kind": "saved" |
+        session, deletable with B, or None), `elapsed_s` / `episode_time_s` and `waiting_for` (what the
+        idle wait needs: "robot" and / or "teleop"; [] when nothing) and `result` (`{"kind": "saved" |
         "discarded" | "deleted", "episode": N}`). Keys are merged into the previous status."""
         status = dict(status)
         result = status.pop("result", None)
@@ -314,6 +316,24 @@ class UnitreeG1XRTeleop(Teleoperator):
             return None
         return ("last", deletable)
 
+    def _idle_lines(self) -> list[Line]:
+        """Idle banner: what `lerobot-record` waits for (`waiting_for`: "robot" / "teleop"), else READY."""
+        waiting_for = self._status.get("waiting_for") or []
+        if "robot" not in waiting_for:
+            return [Line("READY  A: start", GREEN)]
+        # The band / locomotion hold gesture only works while disengaged.
+        if self._engaged:
+            return [
+                Line("WAITING", YELLOW),
+                Line("A: disengage, then", YELLOW),
+                Line("hold both grips 1 s", YELLOW),
+            ]
+        return [
+            Line("WAITING", YELLOW),
+            Line("Hold both grips 1 s: release band", YELLOW),
+            Line("then A: start"),
+        ]
+
     def _overlay_lines(self, now: float) -> list[Line]:
         status = self._status
         state = status.get("state")
@@ -332,7 +352,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         elif state == "saving":
             base = [Line(f"SAVING ep {episode}...", YELLOW)]
         else:
-            base = [Line("READY  A: start", GREEN)]
+            base = self._idle_lines()
             if (deletable := status.get("deletable")) is not None:
                 base.append(Line(f"B: delete last (ep {deletable})"))
             base.append(Line(kept))
