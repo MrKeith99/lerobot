@@ -21,6 +21,7 @@ import pytest
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
 pytest.importorskip("deepdiff", reason="deepdiff is required (install lerobot[hardware])")
 
+from lerobot.datasets.deleted_episodes import read_deleted_episodes  # noqa: E402
 from lerobot.scripts import lerobot_record  # noqa: E402
 from lerobot.teleoperators.teleoperator import Teleoperator  # noqa: E402
 from lerobot.teleoperators.utils import TeleopEvents  # noqa: E402
@@ -61,6 +62,7 @@ class FakeTeleop(Teleoperator):
         return {
             TeleopEvents.SUCCESS: TeleopEvents.SUCCESS in pending,
             TeleopEvents.RERECORD_EPISODE: TeleopEvents.RERECORD_EPISODE in pending,
+            TeleopEvents.DELETE_LAST_EPISODE: TeleopEvents.DELETE_LAST_EPISODE in pending,
         }
 
 
@@ -68,7 +70,7 @@ class NoEventsTeleop(FakeTeleop):
     get_teleop_events = None
 
 
-def run_one_iteration(teleop, events):
+def run_one_iteration(teleop, events, dataset=None, on_delete_last=None):
     robot = MagicMock()
     robot.get_observation.return_value = {}
     identity = MagicMock(side_effect=lambda x: x)
@@ -81,6 +83,8 @@ def run_one_iteration(teleop, events):
         robot_observation_processor=identity,
         teleop=teleop,
         control_time_s=0.0005,
+        dataset=dataset,
+        on_delete_last=on_delete_last,
     )
     return robot
 
@@ -122,3 +126,60 @@ def test_list_teleops_are_unaffected():
     lerobot_record.apply_teleop_events(teleops, events)
     assert events == make_events()
     assert arm.pending == {TeleopEvents.SUCCESS}
+
+
+def test_delete_last_event_calls_the_handler_outside_an_episode():
+    events, handler = make_events(), MagicMock()
+    run_one_iteration(FakeTeleop({TeleopEvents.DELETE_LAST_EPISODE}), events, on_delete_last=handler)
+    handler.assert_called_once_with()
+    assert events == make_events(), "no flag is left behind and the loop is not ended"
+
+
+def test_delete_last_event_is_ignored_while_recording():
+    events, handler = make_events(), MagicMock()
+    dataset = MagicMock(fps=1000)
+    run_one_iteration(FakeTeleop({TeleopEvents.DELETE_LAST_EPISODE}), events, dataset, handler)
+    handler.assert_not_called()
+
+
+def test_record_status_reaches_only_teleops_with_the_hook():
+    class WithStatus(FakeTeleop):
+        def on_record_status(self, status):
+            self.status = status
+
+    teleop = WithStatus()
+    lerobot_record.notify_record_status(teleop, state="idle")
+    lerobot_record.notify_record_status([FakeTeleop(), teleop], state="reset")
+    lerobot_record.notify_record_status(FakeTeleop(), state="idle")
+    assert teleop.status == {"state": "reset"}
+
+
+def test_record_session_tracks_the_deletable_episode(tmp_path):
+    class WithStatus(FakeTeleop):
+        def __init__(self):
+            super().__init__()
+            self.history = []
+
+        def on_record_status(self, status):
+            self.history.append(status)
+
+    dataset = MagicMock(num_episodes=5, root=tmp_path)
+    dataset.save_episode.side_effect = lambda: setattr(dataset, "num_episodes", dataset.num_episodes + 1)
+    teleop = WithStatus()
+    session = lerobot_record.RecordSession(dataset, teleop, target=3, episode_time_s=10, play_sounds=False)
+    session.delete_last()  # nothing saved in this session
+    assert read_deleted_episodes(tmp_path) == []
+    session.save()
+    assert (session.recorded, session.last_saved) == (1, 5)
+    assert teleop.history[-1]["result"] == {"kind": "saved", "episode": 5}
+    session.save()
+    session.delete_last()
+    assert (session.recorded, session.last_saved) == (1, None)
+    assert read_deleted_episodes(tmp_path) == [6]
+    assert teleop.history[-1]["deletable"] is None and teleop.history[-1]["kept"] == 1
+    session.delete_last()
+    assert read_deleted_episodes(tmp_path) == [6], "only the last episode is deletable, once"
+    session.discard()
+    dataset.clear_episode_buffer.assert_called_once()
+    assert session.recorded == 1
+    assert teleop.history[-1]["result"] == {"kind": "discarded", "episode": 7}

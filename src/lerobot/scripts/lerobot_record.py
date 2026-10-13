@@ -91,6 +91,7 @@ lerobot-record \\
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pprint import pformat
 
@@ -108,6 +109,11 @@ from lerobot.datasets import (
     aggregate_pipeline_dataset_features,
     create_initial_features,
     safe_stop_image_writer,
+)
+from lerobot.datasets.deleted_episodes import (
+    apply_deleted_episodes,
+    mark_episode_deleted,
+    read_deleted_episodes,
 )
 from lerobot.processor import (
     RobotAction,
@@ -246,6 +252,9 @@ def apply_teleop_events(teleop, events: dict) -> None:
     if teleop_events.get(TeleopEvents.SUCCESS):
         logging.info("Teleop: end episode")
         events["exit_early"] = True
+    if teleop_events.get(TeleopEvents.DELETE_LAST_EPISODE):
+        logging.info("Teleop: delete the last episode")
+        events["delete_last_episode"] = True
 
 
 @safe_stop_image_writer
@@ -269,6 +278,7 @@ def record_loop(
     display_data: bool = False,
     display_mode: str = "rerun",
     display_compressed_images: bool = False,
+    on_delete_last: Callable[[], None] | None = None,
 ):
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
@@ -321,10 +331,15 @@ def record_loop(
 
         # Get action from teleop
         if isinstance(teleop, Teleoperator):
+            if dataset is not None:
+                notify_record_status(teleop, elapsed_s=timestamp)
             if isinstance(robot, UnitreeG1):
                 teleop.send_feedback({**obs, ROBOT_TYPE_FEEDBACK_KEY: robot.name})
             act = teleop.get_action()
             apply_teleop_events(teleop, events)
+            # Only outside an episode (the teleop turns B into a re-record while recording).
+            if events.pop("delete_last_episode", False) and dataset is None and on_delete_last is not None:
+                on_delete_last()
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor
             act_processed_teleop = teleop_action_processor((act, obs))
@@ -389,6 +404,73 @@ def notify_episode_end(teleop) -> None:
         on_episode_end = getattr(t, "on_episode_end", None)
         if callable(on_episode_end):
             on_episode_end()
+
+
+def apply_session_deletions(dataset: LeRobotDataset) -> LeRobotDataset:
+    """Drop the episodes the operator deleted from the finalized dataset; returns it reloaded if it changed."""
+    if not read_deleted_episodes(dataset.root):
+        return dataset
+    if not apply_deleted_episodes(dataset.root, dataset.repo_id):
+        return dataset
+    return LeRobotDataset(dataset.repo_id, root=dataset.root)
+
+
+def notify_record_status(teleop, **status) -> None:
+    """Call `on_record_status(status)` on the teleoperators that define it (e.g. for the XR headset overlay)."""
+    for t in teleop if isinstance(teleop, list) else [teleop]:
+        on_record_status = getattr(t, "on_record_status", None)
+        if callable(on_record_status):
+            on_record_status(status)
+
+
+@dataclass
+class RecordSession:
+    """Episodes kept in this recording session, and the one the operator can still delete."""
+
+    dataset: LeRobotDataset
+    teleop: Teleoperator | list[Teleoperator] | None
+    target: int
+    episode_time_s: float
+    play_sounds: bool = True
+    recorded: int = 0
+    last_saved: int | None = None
+
+    def status(self, **status) -> None:
+        notify_record_status(
+            self.teleop,
+            episode=self.dataset.num_episodes,
+            kept=self.recorded,
+            target=self.target,
+            episode_time_s=self.episode_time_s,
+            deletable=self.last_saved,
+            **status,
+        )
+
+    def save(self) -> None:
+        episode = self.dataset.num_episodes
+        self.status(state="saving")
+        self.dataset.save_episode()
+        self.recorded += 1
+        self.last_saved = episode
+        self.status(result={"kind": "saved", "episode": episode})
+
+    def discard(self) -> None:
+        log_say("Re-record episode", self.play_sounds)
+        episode = self.dataset.num_episodes
+        self.dataset.clear_episode_buffer()
+        self.status(result={"kind": "discarded", "episode": episode})
+
+    def delete_last(self) -> None:
+        """Mark the last episode saved this session as deleted (applied once the dataset is finalized)."""
+        episode = self.last_saved
+        if episode is None:
+            return
+        mark_episode_deleted(self.dataset.root, episode)
+        self.last_saved = None
+        self.recorded -= 1
+        logging.info(f"Episode {episode} marked as deleted (removed when the dataset is finalized)")
+        log_say(f"Deleted episode {episode}", self.play_sounds)
+        self.status(result={"kind": "deleted", "episode": episode})
 
 
 def components_not_ready(robot, teleop) -> list[str]:
@@ -533,8 +615,15 @@ def record(
             )
 
         with VideoEncodingManager(dataset):
-            recorded_episodes = 0
-            while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
+            session = RecordSession(
+                dataset,
+                teleop,
+                target=cfg.dataset.num_episodes,
+                episode_time_s=cfg.dataset.episode_time_s,
+                play_sounds=cfg.play_sounds,
+            )
+            while session.recorded < cfg.dataset.num_episodes and not events["stop_recording"]:
+                session.status(state="idle")
                 if cfg.wait_for_operator:
                     wait_until_ready(
                         robot,
@@ -548,11 +637,13 @@ def record(
                         single_task=cfg.dataset.single_task,
                         display_data=cfg.display_data,
                         display_mode=cfg.display_mode,
+                        on_delete_last=session.delete_last,
                     )
                     if events["stop_recording"]:
                         break
 
                 log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
+                session.status(state="recording", elapsed_s=0.0)
                 record_loop(
                     robot=robot,
                     events=events,
@@ -570,12 +661,20 @@ def record(
                 )
                 notify_episode_end(teleop)
 
+                # Save (or drop) the episode before the reset phase so that it can still be deleted there.
+                rerecord = events["rerecord_episode"]
+                if rerecord:
+                    events["rerecord_episode"] = False
+                    events["exit_early"] = False
+                    session.discard()
+                else:
+                    session.save()
+
                 # Execute a few seconds without recording to give time to manually reset the environment
                 # Skip reset for the last episode to be recorded
-                if not events["stop_recording"] and (
-                    (recorded_episodes < cfg.dataset.num_episodes - 1) or events["rerecord_episode"]
-                ):
+                if not events["stop_recording"] and (session.recorded < cfg.dataset.num_episodes or rerecord):
                     log_say("Reset the environment", cfg.play_sounds)
+                    session.status(state="reset")
 
                     record_loop(
                         robot=robot,
@@ -589,22 +688,16 @@ def record(
                         single_task=cfg.dataset.single_task,
                         display_data=cfg.display_data,
                         display_mode=cfg.display_mode,
+                        on_delete_last=session.delete_last,
                     )
-
-                if events["rerecord_episode"]:
-                    log_say("Re-record episode", cfg.play_sounds)
+                    # A re-record asked for during the reset has nothing left to discard.
                     events["rerecord_episode"] = False
-                    events["exit_early"] = False
-                    dataset.clear_episode_buffer()
-                    continue
-
-                dataset.save_episode()
-                recorded_episodes += 1
     finally:
         log_say("Stop recording", cfg.play_sounds, blocking=True)
 
         if dataset:
             dataset.finalize()
+            dataset = apply_session_deletions(dataset)
 
         if robot.is_connected:
             robot.disconnect()
@@ -618,7 +711,9 @@ def record(
             shutdown_visualization(cfg.display_mode)
 
         if cfg.dataset.push_to_hub:
-            if dataset and dataset.num_episodes > 0:
+            if dataset and read_deleted_episodes(dataset.root):
+                logging.warning("Deleted episodes are still pending (see above) — skipping push to hub")
+            elif dataset and dataset.num_episodes > 0:
                 dataset.push_to_hub(tags=cfg.dataset.tags, private=cfg.dataset.private)
             else:
                 logging.warning("No episodes saved — skipping push to hub")

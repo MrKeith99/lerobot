@@ -67,10 +67,19 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     reset_sim_on_episode_end: bool = True
     # A pressed to disengage also ends the episode as a success (like the right stick click).
     end_episode_on_disengage: bool = True
+    # Button that deletes the running episode, or when not recording the last one saved this session. It
+    # needs a second press within `delete_confirm_s` to take effect.
+    delete_button: str = "b"
+    delete_confirm_s: float = 3.0
+    # Draw the recording status (ready / REC / reset / saving / delete prompt) on the image sent to the
+    # headset (ego / immersive display modes).
+    status_overlay: bool = True
 
     def __post_init__(self) -> None:
         if self.band_toggle_hold_s <= 0:
             raise ValueError(f"band_toggle_hold_s must be > 0, got {self.band_toggle_hold_s}")
+        if self.delete_confirm_s <= 0:
+            raise ValueError(f"delete_confirm_s must be > 0, got {self.delete_confirm_s}")
         for name, value, allowed in (
             ("body", self.body, BODIES),
             ("end_effector", self.end_effector, END_EFFECTORS),

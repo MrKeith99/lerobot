@@ -23,8 +23,13 @@ closure plus its joint targets, the navigation command and remote axes, and `kBa
 
 Controllers: A engages/disengages (recentering on the operator's facing direction and starting from the
 measured arm pose; disengaging also ends the episode as success), triggers close the hands, the left stick walks, the right stick's x turns, X/Y held lower/raise the base, and the
-right/left stick clicks end the episode as success/rerecord. Hand tracking has no buttons: it engages
-once, when tracking first starts. Targets hold while tracking is lost.
+right/left stick clicks end the episode as success/rerecord. B (twice within `delete_confirm_s`) deletes:
+the running episode (discarded like a rerecord) while recording, otherwise the last episode saved in this
+session. Hand tracking has no buttons: it engages once, when tracking first starts. Targets hold while
+tracking is lost.
+
+`lerobot-record` reports its state through `on_record_status()`; with `status_overlay` the headset image gets
+a banner with it (ready / REC time / reset / saving / delete prompt / result of the last action).
 """
 
 from __future__ import annotations
@@ -63,6 +68,7 @@ from lerobot.utils.import_utils import require_package
 from ..teleoperator import Teleoperator
 from ..utils import TeleopEvents
 from .config_unitree_g1_xr import UnitreeG1XRTeleopConfig
+from .status_overlay import GREEN, ORANGE, RED, YELLOW, Line, draw_status
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +78,9 @@ _RESET_RESYNC_S = 1.0
 # GrootLocomotionController's waist raise/lower slots, as in the gamepad teleop.
 _WAIST_RAISE_KEY = "remote.button.0"
 _WAIST_LOWER_KEY = "remote.button.4"
+_NOTICE_S = 3.0
+# `result["kind"]` of on_record_status -> headset text, color.
+_RESULTS = {"saved": ("SAVED", GREEN), "discarded": ("DISCARDED", ORANGE), "deleted": ("DELETED", ORANGE)}
 
 
 def arm_key(joint_name: str) -> str:
@@ -124,6 +133,10 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._band_toggle_fired = False
         self._resync_s = 0.0
         self._reset_pending = False
+        self._status: dict[str, Any] = {}
+        self._notice: tuple[str, tuple[int, int, int], float] | None = None
+        self._confirm: tuple[tuple, float] | None = None
+        self._last_image: Any = None
 
     @cached_property
     def action_features(self) -> dict[str, type]:
@@ -186,6 +199,10 @@ class UnitreeG1XRTeleop(Teleoperator):
         print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
         print("  Right / left stick click: end episode success / rerecord")
         print(
+            f"  {cfg.delete_button.upper()} twice (within {cfg.delete_confirm_s:g} s): delete the running "
+            "episode, or when not recording the last one saved this session"
+        )
+        print(
             f"  Both grips {cfg.band_toggle_hold_s:g} s (disengaged): start / stop locomotion "
             "(sim: release / attach the band)"
         )
@@ -242,12 +259,103 @@ class UnitreeG1XRTeleop(Teleoperator):
                     f"--teleop.display_camera."
                 )
             return
+        self._last_image = image
+        self._show(image)
+
+    def _show(self, image: Any) -> None:
+        if self.config.status_overlay and self._has_overlay():
+            image = draw_status(image, self._overlay_lines(time.perf_counter()))
         try:
             self.xr.render(image)
         except Exception:
             if not self._warned_no_camera:
                 self._warned_no_camera = True
-                logger.warning(f"Could not show {cfg.display_camera!r} in the headset", exc_info=True)
+                logger.warning(f"Could not show {self.config.display_camera!r} in the headset", exc_info=True)
+
+    def _has_overlay(self) -> bool:
+        return bool(self._status) or self._notice is not None
+
+    def on_record_status(self, status: dict[str, Any]) -> None:
+        """State from `lerobot-record`: `state` (idle / recording / reset / saving), `episode` (index of the
+        running or next one), `kept` / `target` (episodes), `deletable` (index of the last episode saved this
+        session, deletable with B, or None), `elapsed_s` / `episode_time_s` and `result` (`{"kind": "saved" |
+        "discarded" | "deleted", "episode": N}`). Keys are merged into the previous status."""
+        status = dict(status)
+        result = status.pop("result", None)
+        changed = any(self._status.get(k) != v for k, v in status.items() if k != "elapsed_s")
+        self._status.update(status)
+        if result is not None:
+            text, color = _RESULTS[result["kind"]]
+            self._notice = (f"{text} ep {result['episode']}", color, time.perf_counter() + _NOTICE_S)
+            changed = True
+        # save_episode blocks the loop: show the new state at once on the last image.
+        if (
+            changed
+            and self._last_image is not None
+            and self.xr is not None
+            and self.config.display_mode != "pass-through"
+        ):
+            self._show(self._last_image)
+
+    def _delete_target(self) -> tuple | None:
+        """What B would delete now: ("running",), ("last", episode index) or None."""
+        state = self._status.get("state")
+        if state == "recording":
+            return ("running",)
+        deletable = self._status.get("deletable")
+        if state == "saving" or deletable is None:
+            return None
+        return ("last", deletable)
+
+    def _overlay_lines(self, now: float) -> list[Line]:
+        status = self._status
+        state = status.get("state")
+        episode = status.get("episode")
+        kept = f"kept {status.get('kept', 0)} / {status.get('target', '?')}"
+        if state == "recording":
+            elapsed, total = status.get("elapsed_s", 0.0), status.get("episode_time_s")
+            clock = f"{int(elapsed) // 60:02d}:{int(elapsed) % 60:02d}"
+            if total is not None:
+                clock += f" / {int(total) // 60:02d}:{int(total) % 60:02d}"
+            base = [Line(f"REC ep {episode}  {clock}", RED, dot=True), Line(f"B: discard  {kept}")]
+        elif state == "reset":
+            base = [Line("RESET", YELLOW)]
+            if (deletable := status.get("deletable")) is not None:
+                base.append(Line(f"B: delete last (ep {deletable})  {kept}"))
+        elif state == "saving":
+            base = [Line(f"SAVING ep {episode}...", YELLOW)]
+        else:
+            base = [Line("READY  A: start", GREEN)]
+            if (deletable := status.get("deletable")) is not None:
+                base.append(Line(f"B: delete last (ep {deletable})"))
+            base.append(Line(kept))
+        if self._confirm is not None and self._confirm[0] == self._delete_target() and now < self._confirm[1]:
+            what = "running episode" if self._confirm[0][0] == "running" else f"ep {self._confirm[0][1]}"
+            return [
+                Line(f"Delete {what}?", YELLOW),
+                Line(
+                    f"press {self.config.delete_button.upper()} again  {self._confirm[1] - now:.1f}s", YELLOW
+                ),
+            ]
+        if self._notice is not None and now < self._notice[2]:
+            return [Line(self._notice[0], self._notice[1]), *base[:1]]
+        return base
+
+    def _on_delete_pressed(self, now: float) -> None:
+        target = self._delete_target()
+        if target is None:
+            self._confirm = None
+            if self._status.get("state") != "saving":
+                self._notice = ("nothing to delete", ORANGE, now + _NOTICE_S)
+            return
+        if self._confirm is not None and self._confirm[0] == target and now < self._confirm[1]:
+            self._confirm = None
+            self._pending_events.add(
+                TeleopEvents.RERECORD_EPISODE if target[0] == "running" else TeleopEvents.DELETE_LAST_EPISODE
+            )
+            logger.info("XR teleop: delete confirmed (%s)", target[0])
+        else:
+            self._confirm = (target, now + self.config.delete_confirm_s)
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:
         """Check the embodiment, track the measured arm pose and, on the first full observation, hold every
@@ -375,6 +483,8 @@ class UnitreeG1XRTeleop(Teleoperator):
             self._pending_events.add(TeleopEvents.SUCCESS)
         if "left_stick" in pressed:
             self._pending_events.add(TeleopEvents.RERECORD_EPISODE)
+        if self.config.delete_button in pressed:
+            self._on_delete_pressed(now)
 
         active = self._engaged and frame.tracking
         if active:
@@ -421,7 +531,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         events, self._pending_events = self._pending_events, set()
         return {
             TeleopEvents.IS_INTERVENTION: self._engaged,
-            TeleopEvents.TERMINATE_EPISODE: bool(events),
+            TeleopEvents.TERMINATE_EPISODE: bool(events - {TeleopEvents.DELETE_LAST_EPISODE}),
+            TeleopEvents.DELETE_LAST_EPISODE: TeleopEvents.DELETE_LAST_EPISODE in events,
             TeleopEvents.SUCCESS: TeleopEvents.SUCCESS in events,
             TeleopEvents.RERECORD_EPISODE: TeleopEvents.RERECORD_EPISODE in events,
         }

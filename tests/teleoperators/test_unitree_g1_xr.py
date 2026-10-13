@@ -455,7 +455,7 @@ def test_sim_reset_key_is_a_zero_action_feature(clock):
     assert step(teleop, clock, XRFrame())[SIM_RESET_KEY] == 0.0
 
 
-def test_b_changes_nothing(clock):
+def test_b_does_not_reset_or_engage(clock):
     teleop = make_teleop(clock)
     teleop.send_feedback(observation())
     frame = XRFrame(tracking=True, buttons={"b": True})
@@ -555,3 +555,150 @@ def test_episode_end_does_nothing_when_the_option_is_off(clock):
     teleop.on_episode_end()
     assert teleop.engaged
     assert [step(teleop, clock, XRFrame(tracking=True))[SIM_RESET_KEY] for _ in range(100)] == [0.0] * 100
+
+
+def events_of(teleop):
+    events = teleop.get_teleop_events()
+    return {e for e in (TeleopEvents.RERECORD_EPISODE, TeleopEvents.DELETE_LAST_EPISODE) if events[e]}
+
+
+def test_b_while_recording_discards_the_episode_after_a_second_press(clock):
+    teleop = make_teleop(clock)
+    teleop.on_record_status({"state": "recording"})
+    press(teleop, clock, "b")
+    assert events_of(teleop) == set()
+    press(teleop, clock, "b")
+    events = teleop.get_teleop_events()
+    assert events[TeleopEvents.RERECORD_EPISODE] and events[TeleopEvents.TERMINATE_EPISODE]
+    assert not events[TeleopEvents.DELETE_LAST_EPISODE]
+
+
+def test_b_confirmation_expires(clock):
+    teleop = make_teleop(clock, delete_confirm_s=2.0)
+    teleop.on_record_status({"state": "recording"})
+    press(teleop, clock, "b")
+    clock[0] += 2.5
+    press(teleop, clock, "b")
+    assert events_of(teleop) == set(), "the second press after the window is a first press"
+    press(teleop, clock, "b")
+    assert events_of(teleop) == {TeleopEvents.RERECORD_EPISODE}
+
+
+def test_b_while_idle_deletes_the_last_session_episode_once(clock):
+    teleop = make_teleop(clock)
+    teleop.on_record_status({"state": "idle", "deletable": None})
+    press(teleop, clock, "b")
+    press(teleop, clock, "b")
+    assert events_of(teleop) == set(), "nothing was saved in this session"
+    teleop.on_record_status({"state": "idle", "deletable": 4})
+    press(teleop, clock, "b")
+    assert events_of(teleop) == set()
+    press(teleop, clock, "b")
+    events = teleop.get_teleop_events()
+    assert events[TeleopEvents.DELETE_LAST_EPISODE] and not events[TeleopEvents.TERMINATE_EPISODE]
+    teleop.on_record_status({"deletable": None, "result": {"kind": "deleted", "episode": 4}})
+    press(teleop, clock, "b")
+    press(teleop, clock, "b")
+    assert events_of(teleop) == set()
+
+
+def test_b_confirmation_does_not_carry_over_to_another_target(clock):
+    teleop = make_teleop(clock)
+    teleop.on_record_status({"state": "recording"})
+    press(teleop, clock, "b")
+    teleop.on_record_status({"state": "reset", "deletable": 2})
+    press(teleop, clock, "b")
+    assert events_of(teleop) == set()
+
+
+def test_delete_button_is_configurable(clock):
+    teleop = make_teleop(clock, delete_button="y")
+    teleop.on_record_status({"state": "recording"})
+    press(teleop, clock, "b")
+    press(teleop, clock, "b")
+    assert events_of(teleop) == set()
+    press(teleop, clock, "y")
+    press(teleop, clock, "y")
+    assert events_of(teleop) == {TeleopEvents.RERECORD_EPISODE}
+
+
+def test_delete_confirm_must_be_positive():
+    with pytest.raises(ValueError, match="delete_confirm_s"):
+        UnitreeG1XRTeleopConfig(delete_confirm_s=0.0)
+
+
+def overlay_teleop(clock, **overrides):
+    teleop = make_teleop(clock, display_mode="ego", **overrides)
+    teleop.send_feedback(observation())
+    return teleop
+
+
+def camera_obs(value=40):
+    return observation(head_camera=np.full((480, 640, 3), value, dtype=np.uint8))
+
+
+def test_overlay_draws_on_a_copy_of_the_observation_image(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status({"state": "recording", "episode": 3, "elapsed_s": 5.0, "episode_time_s": 30})
+    obs = camera_obs()
+    original = obs["head_camera"].copy()
+    teleop.send_feedback(obs)
+    shown = teleop.xr.rendered[-1]
+    assert np.array_equal(obs["head_camera"], original), "the saved observation must stay untouched"
+    assert shown is not obs["head_camera"]
+    assert not np.array_equal(shown, original)
+    assert np.array_equal(shown[-100:], original[-100:]), "only the banner is drawn"
+
+
+def test_overlay_can_be_disabled_or_absent_without_status(clock):
+    obs = camera_obs()
+    teleop = overlay_teleop(clock, status_overlay=False)
+    teleop.on_record_status({"state": "recording"})
+    teleop.send_feedback(obs)
+    assert np.array_equal(teleop.xr.rendered[-1], obs["head_camera"])
+    teleop = overlay_teleop(clock)
+    teleop.send_feedback(obs)
+    assert np.array_equal(teleop.xr.rendered[-1], obs["head_camera"])
+
+
+def test_overlay_text_follows_the_state(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status({"state": "idle", "deletable": 7, "kept": 12, "target": 50, "episode": 8})
+    texts = lambda: [line.text for line in teleop._overlay_lines(clock[0])]  # noqa: E731
+    assert texts() == ["READY  A: start", "B: delete last (ep 7)", "kept 12 / 50"]
+    teleop.on_record_status({"state": "recording", "elapsed_s": 65.2, "episode_time_s": 90})
+    assert texts()[0] == "REC ep 8  01:05 / 01:30"
+    teleop.on_record_status({"state": "reset"})
+    assert texts()[0] == "RESET"
+    teleop.on_record_status({"state": "saving"})
+    assert texts() == ["SAVING ep 8..."]
+    teleop.on_record_status({"state": "idle", "result": {"kind": "saved", "episode": 8}})
+    assert texts()[0] == "SAVED ep 8"
+    clock[0] += 3.5
+    assert texts()[0] == "READY  A: start"
+
+
+def test_overlay_shows_the_delete_prompt(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status({"state": "idle", "deletable": 7})
+    press(teleop, clock, "b")
+    lines = teleop._overlay_lines(clock[0])
+    assert lines[0].text == "Delete ep 7?" and "press B again" in lines[1].text
+    teleop.on_record_status({"state": "recording"})
+    press(teleop, clock, "b")
+    assert teleop._overlay_lines(clock[0])[0].text == "Delete running episode?"
+    press(teleop, clock, "b")  # nothing to delete
+    teleop.on_record_status({"state": "idle", "deletable": None})
+    press(teleop, clock, "b")
+    assert teleop._overlay_lines(clock[0])[0].text == "nothing to delete"
+
+
+def test_status_change_rerenders_the_last_image_at_once(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status({"state": "recording", "elapsed_s": 1.0})
+    teleop.send_feedback(camera_obs())
+    count = len(teleop.xr.rendered)
+    teleop.on_record_status({"elapsed_s": 2.0})
+    assert len(teleop.xr.rendered) == count, "elapsed time alone waits for the next frame"
+    teleop.on_record_status({"state": "saving"})
+    assert len(teleop.xr.rendered) == count + 1

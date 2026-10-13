@@ -117,5 +117,6 @@ def test_record_notifies_right_after_the_episode_loop_before_the_reset_phase():
     episode_loop = source.index("dataset=dataset,")
     notify = source.index("notify_episode_end(teleop)")
     reset_phase = source.index("Reset the environment")
-    rerecord = source.index("clear_episode_buffer()")
-    assert episode_loop < notify < reset_phase < rerecord
+    # The episode is saved / discarded before the reset phase so that it can still be deleted there.
+    discard = source.index("session.discard()")
+    assert episode_loop < notify < discard < reset_phase
