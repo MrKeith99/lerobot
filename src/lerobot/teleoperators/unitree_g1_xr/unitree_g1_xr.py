@@ -317,8 +317,10 @@ class UnitreeG1XRTeleop(Teleoperator):
         return ("last", deletable)
 
     def _idle_lines(self) -> list[Line]:
-        """Idle banner: what `lerobot-record` waits for (`waiting_for`: "robot" / "teleop"), else READY."""
+        """Idle banner: what `lerobot-record` waits for (`waiting_for`: "robot" / "robot_settling" / "teleop"), else READY."""
         waiting_for = self._status.get("waiting_for") or []
+        if "robot_settling" in waiting_for and "robot" not in waiting_for:
+            return [Line("WAITING", YELLOW), Line("settling...", YELLOW)]
         if "robot" not in waiting_for:
             return [Line("READY  A: start", GREEN)]
         # The band / locomotion hold gesture only works while disengaged.

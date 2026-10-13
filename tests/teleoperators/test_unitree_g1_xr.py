@@ -758,6 +758,19 @@ def test_idle_banner_asks_to_disengage_first_when_engaged_with_the_robot_not_rea
     assert texts[0] == "WAITING" and texts[1].startswith("A: disengage") and "hold both grips 1 s" in texts[2]
 
 
+def test_idle_banner_shows_settling_in_yellow_after_the_band_release(clock):
+    teleop = overlay_teleop(clock)
+    teleop.on_record_status({"state": "idle", "waiting_for": ["robot_settling"]})
+    lines = teleop._overlay_lines(clock[0])
+    assert [line.text for line in lines][:2] == ["WAITING", "settling..."]
+    assert lines[0].color == lines[1].color == xr_module.YELLOW
+    # Engaged or not, settling needs no operator gesture; a plain "robot" still asks for the band release
+    teleop._engaged = True
+    assert idle_texts(teleop, clock)[1] == "settling..."
+    teleop.on_record_status({"waiting_for": ["robot"]})
+    assert "disengage" in idle_texts(teleop, clock)[1]
+
+
 def test_idle_banner_back_to_ready_when_the_wait_ends(clock):
     teleop = overlay_teleop(clock)
     teleop.on_record_status({"state": "idle", "waiting_for": ["robot"]})

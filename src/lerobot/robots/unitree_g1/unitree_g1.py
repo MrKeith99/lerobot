@@ -241,6 +241,12 @@ class UnitreeG1(Robot):
         # Sim re-placement after a band release: `pending` = band seen attached, waiting for its release
         self._replace_pending = False
         self._replace_deadline: float | None = None
+        # Sim start pose: sampled (x m, y m, yaw rad) relative to the spawn, applied by the next poll of the
+        # sim-stepping thread (`_sim_start_pending`). None until the band is first seen attached.
+        self._sim_rng = np.random.default_rng()
+        self._sim_start_rel: tuple[float, float, float] | None = None
+        self._sim_start_pending = False
+        self._band_yaw_hooked = None
         self._locomotion_enabled = False
         self._locomotion_toggle_requested = False
         self._locomotion_toggle_was_requested = False
@@ -262,10 +268,29 @@ class UnitreeG1(Robot):
         band = getattr(sim, "elastic_band", None)
         return band is not None and band.enable
 
-    def ready_to_record(self) -> bool:
-        if self._locomotion_gated and not self._locomotion_enabled:
+    def _sim_settling(self) -> bool:
+        """True while a post-release re-placement is still to happen (band released, deadline not reached)."""
+        if not self.config.is_simulation or self.config.sim_replace_after_release_s is None:
             return False
-        return not (self.config.is_simulation and self.config.controller and self._sim_band_attached())
+        sim = getattr(getattr(self.sim_env, "simulator", None), "sim_env", None)
+        band = getattr(sim, "elastic_band", None)
+        if band is None or band.enable:
+            return False
+        return self._replace_pending or self._replace_deadline is not None
+
+    def not_ready_reason(self) -> str | None:
+        """Why `ready_to_record()` is False: "band" (sim band attached), "settling" (sim re-placement
+        pending), "locomotion" (real robot, locomotion not started) or None when ready."""
+        if self._locomotion_gated and not self._locomotion_enabled:
+            return "locomotion"
+        if self.config.is_simulation and self.config.controller and self._sim_band_attached():
+            return "band"
+        if self._sim_settling():
+            return "settling"
+        return None
+
+    def ready_to_record(self) -> bool:
+        return self.not_ready_reason() is None
 
     def _make_sim_legs_limp(self) -> None:
         """Zero legs/waist gains in the command send_action keeps republishing and in the one the sim holds."""
@@ -321,6 +346,8 @@ class UnitreeG1(Robot):
         band.length = 0
         self.sim_env.reset()
         self._cancel_sim_replace()
+        self._request_sim_start()
+        self._apply_sim_start(getattr(getattr(self.sim_env, "simulator", None), "sim_env", None), band)
         self._arm_sim_band_release()
         # Legs go limp right away; the controller loop keeps the policy off until the band is released
         self._make_sim_legs_limp()
@@ -346,44 +373,132 @@ class UnitreeG1(Robot):
             self._replace_deadline = None
             self._replace_sim_base(sim)
 
+    @property
+    def sim_start(self) -> tuple[float, float, float] | None:
+        """The current sampled sim start (x m, y m, yaw deg) relative to the spawn; None before the first one."""
+        if self._sim_start_rel is None:
+            return None
+        x, y, yaw = self._sim_start_rel
+        return (x, y, float(np.degrees(yaw)))
+
+    def _seed_sim_start(self, seed: int | None) -> None:
+        """Test hook: make the start sampling deterministic."""
+        self._sim_rng = np.random.default_rng(seed)
+
+    def _request_sim_start(self) -> None:
+        """Sample a new start (offset + uniform jitter) for the sim-stepping thread to apply on its next poll."""
+        cfg = self.config
+        if not cfg.is_simulation or not (any(cfg.sim_start_offset) or any(cfg.sim_start_randomize)):
+            return
+        jitter_xy, jitter_yaw = cfg.sim_start_randomize
+        ox, oy, oyaw = cfg.sim_start_offset
+        x = ox + self._sim_rng.uniform(-jitter_xy, jitter_xy)
+        y = oy + self._sim_rng.uniform(-jitter_xy, jitter_xy)
+        yaw = oyaw + self._sim_rng.uniform(-jitter_yaw, jitter_yaw)
+        self._sim_start_rel = (float(x), float(y), float(np.radians(yaw)))
+        self._sim_start_pending = True
+        logger.info(f"Sim start sampled (relative to spawn): x {x:+.3f} m, y {y:+.3f} m, yaw {yaw:+.1f} deg")
+
+    def _apply_sim_start(self, sim, band) -> None:
+        """Move the robot to the sampled start and hang the band over it. Runs on the sim-stepping thread."""
+        if not self._sim_start_pending or self._sim_start_rel is None or sim is None:
+            return
+        self._sim_start_pending = False
+        self._replace_sim_base(sim, self._sim_start_rel, label="Sim robot placed at its sampled start")
+        x, y, _ = self._sim_start_base_xy(sim)
+        band.point = np.array([x, y, float(band.point[2])])
+        self._hook_band_yaw(band)
+
+    def _sim_start_base_xy(self, sim) -> tuple[float, float, float]:
+        """World (x, y, yaw) of the current start target."""
+        rel = self._sim_start_rel or (0.0, 0.0, 0.0)
+        spawn = self._sim_spawn(sim)
+        return (spawn[0] + rel[0], spawn[1] + rel[1], spawn[2] + rel[2])
+
     @staticmethod
-    def _replace_sim_base(sim) -> None:
-        """Move the floating base back to its spawn x, y, yaw, keeping height, roll/pitch and joint positions."""
+    def _sim_base_joint(sim):
+        """(mujoco, model, data, qpos address, dof address) of the robot's floating base, or None."""
         try:
             import mujoco
         except ImportError:
             logger.warning("Sim re-placement skipped: mujoco is not importable")
-            return
+            return None
         model, data = sim.mj_model, sim.mj_data
         # The robot's base by name (world objects have free joints too); first free joint as a fallback
         joint = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "floating_base_joint")
         if joint < 0:
             free = np.flatnonzero(np.asarray(model.jnt_type) == int(mujoco.mjtJoint.mjJNT_FREE))
             if free.size == 0:
-                return
+                return None
             joint = int(free[0])
-        qadr, vadr = int(model.jnt_qposadr[joint]), int(model.jnt_dofadr[joint])
+        return mujoco, model, data, int(model.jnt_qposadr[joint]), int(model.jnt_dofadr[joint])
 
-        def yaw_of(q) -> float:
-            w, x, y, z = q
-            return float(np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
+    @staticmethod
+    def _quat_yaw(q) -> float:
+        w, x, y, z = q
+        return float(np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
 
+    def _sim_spawn(self, sim) -> tuple[float, float, float]:
+        """The robot's spawn (qpos0) x, y, yaw."""
+        base = self._sim_base_joint(sim)
+        if base is None:
+            return (0.0, 0.0, 0.0)
+        _, model, _, qadr, _ = base
+        spawn = np.asarray(model.qpos0[qadr : qadr + 7], dtype=float)
+        return (float(spawn[0]), float(spawn[1]), self._quat_yaw(spawn[3:7]))
+
+    def _hook_band_yaw(self, band) -> None:
+        """Make the band hold the robot's yaw at the start yaw instead of world yaw 0 (its orientation spring
+        otherwise twists a rotated start back). Per instance, once; a zero start yaw keeps the stock torque."""
+        if self._band_yaw_hooked is band or not hasattr(band, "Advance"):
+            return
+        self._band_yaw_hooked = band
+        stock = band.Advance
+
+        def advance(pose):
+            wrench = stock(pose)
+            yaw = self._sim_start_rel[2] if self._sim_start_rel is not None else 0.0
+            if yaw == 0.0:
+                return wrench
+            from scipy.spatial.transform import Rotation
+
+            rot = Rotation.from_quat([pose[4], pose[5], pose[6], pose[3]])  # wxyz -> xyzw
+            err = rot * Rotation.from_euler("z", -yaw)  # world-frame error to the yawed reference
+            torque = -band.kp_ang * err.as_rotvec() - band.kd_ang * np.asarray(pose[10:13])
+            return np.concatenate([np.asarray(wrench)[:3], torque])
+
+        band.Advance = advance
+
+    def _replace_sim_base(
+        self,
+        sim,
+        rel: tuple[float, float, float] | None = None,
+        label: str = "Sim robot re-placed at its start spot",
+    ) -> None:
+        """Move the floating base to spawn + `rel` (x, y, yaw rad; default the current start target), keeping
+        height, roll/pitch and joint positions and zeroing the base velocity."""
+        base = self._sim_base_joint(sim)
+        if base is None:
+            return
+        mujoco, model, data, qadr, vadr = base
+        if rel is None:
+            rel = self._sim_start_rel or (0.0, 0.0, 0.0)
         spawn = np.asarray(model.qpos0[qadr : qadr + 7], dtype=float)
         current = np.array(data.qpos[qadr : qadr + 7], dtype=float)
-        dyaw = (yaw_of(spawn[3:7]) - yaw_of(current[3:7]) + np.pi) % (2 * np.pi) - np.pi
+        target_yaw = self._quat_yaw(spawn[3:7]) + rel[2]
+        dyaw = (target_yaw - self._quat_yaw(current[3:7]) + np.pi) % (2 * np.pi) - np.pi
         # World-z rotation by dyaw composed on the left: yaw changes, roll/pitch stay
         rot_z = np.array([np.cos(dyaw / 2), 0.0, 0.0, np.sin(dyaw / 2)])
         new_quat = np.zeros(4)
         mujoco.mju_mulQuat(new_quat, rot_z, current[3:7])
         new_quat /= np.linalg.norm(new_quat)
-        moved = float(np.hypot(*(spawn[:2] - current[:2])))
-        data.qpos[qadr : qadr + 2] = spawn[:2]
+        target_xy = spawn[:2] + np.asarray(rel[:2])
+        moved = float(np.hypot(*(target_xy - current[:2])))
+        data.qpos[qadr : qadr + 2] = target_xy
         data.qpos[qadr + 3 : qadr + 7] = new_quat
         data.qvel[vadr : vadr + 6] = 0.0
         mujoco.mj_forward(model, data)
-        logger.info(
-            f"Sim robot re-placed at its start spot: moved {moved:.2f} m, yaw corrected {np.degrees(dyaw):.1f} deg"
-        )
+        logger.info(f"{label}: moved {moved:.2f} m, yaw corrected {np.degrees(dyaw):.1f} deg")
 
     def _poll_sim_gamepad_buttons(self):
         """Sim-only gamepad shortcuts: toggle the elastic band (same as "9" in the MuJoCo viewer) and reset."""
@@ -394,6 +509,11 @@ class UnitreeG1(Robot):
         reset_requested, self._reset_requested = self._reset_requested, False
         if band is None:
             return
+
+        # First sight of the attached band (connect): sample the start; applied here, on the stepping thread
+        if self._sim_start_rel is None and band.enable:
+            self._request_sim_start()
+        self._apply_sim_start(sim, band)
 
         if toggle_requested:
             self._toggle_sim_band(band)
@@ -1076,6 +1196,8 @@ class UnitreeG1(Robot):
             "sim_world_grasp": cfg.sim_world_grasp,
             "sim_world_randomize": cfg.sim_world_randomize,
             "sim_replace_after_release_s": cfg.sim_replace_after_release_s,
+            "sim_start_offset": list(cfg.sim_start_offset),
+            "sim_start_randomize": list(cfg.sim_start_randomize),
             "gravity_compensation": cfg.gravity_compensation,
         }
         return info
@@ -1111,6 +1233,7 @@ class UnitreeG1(Robot):
         if self.config.is_simulation and self.sim_env is not None:
             self.sim_env.reset()
             self._cancel_sim_replace()
+            self._request_sim_start()  # applied by the next sim poll
             self.publish_lowcmd(
                 {f"{motor.name}.q": float(default_positions[motor.value]) for motor in G1_29_JointIndex}
             )

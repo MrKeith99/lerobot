@@ -132,6 +132,15 @@ class UnitreeG1Config(RobotConfig):
     # limp-legged drop and recovery steps otherwise leave the robot away from the table. None disables it.
     sim_replace_after_release_s: float | None = 3.0
 
+    # Simulation only: where the robot starts, relative to its spawn (qpos0): (x m, y m, yaw deg). Applied
+    # whenever the robot is (re)put on the elastic band (connect, sim reset); the band hangs it over that spot
+    # and the post-release re-placement returns to it. For walk-then-grasp data, e.g. (-1.0, 0.0, 0.0).
+    sim_start_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    # Simulation only: uniform jitter added to `sim_start_offset` at every episode start / sim reset:
+    # (+-metres on x and y, +-degrees on yaw). (0, 0) = a fixed start.
+    sim_start_randomize: tuple[float, float] = (0.0, 0.0)
+
     # Without a controller: zero the leg gains so the legs hang passive (e.g. on a gantry).
     freeze_legs: bool = False
 
@@ -172,6 +181,12 @@ class UnitreeG1Config(RobotConfig):
             raise ValueError(
                 f"sim_replace_after_release_s must be >= 0, got {self.sim_replace_after_release_s}"
             )
+        if len(self.sim_start_offset) != 3:
+            raise ValueError(f"sim_start_offset must be (x, y, yaw_deg), got {self.sim_start_offset!r}")
+        if len(self.sim_start_randomize) != 2:
+            raise ValueError(f"sim_start_randomize must be (xy_m, yaw_deg), got {self.sim_start_randomize!r}")
+        if any(v < 0 for v in self.sim_start_randomize):
+            raise ValueError(f"sim_start_randomize must be >= 0, got {self.sim_start_randomize}")
         if self.stand_ramp_s <= 0:
             raise ValueError(f"stand_ramp_s must be > 0, got {self.stand_ramp_s}")
         if self.head_default_positions is None:

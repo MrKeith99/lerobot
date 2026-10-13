@@ -1213,3 +1213,211 @@ def test_sim_replace_noop_on_real_robot(unitree_g1):
     with patch("lerobot.robots.unitree_g1.unitree_g1.time.monotonic", return_value=1000.0):
         robot._update_sim_replace(robot.sim_env.simulator.sim_env, band)
     assert data.qpos[0] == 2.0
+
+
+# --- Randomized sim start pose ---
+
+
+def _start_robot(unitree_g1, offset=(0.0, 0.0, 0.0), randomize=(0.0, 0.0), delay=2.0):
+    robot, _ = unitree_g1
+    robot.config.sim_start_offset = offset
+    robot.config.sim_start_randomize = randomize
+    robot.config.sim_replace_after_release_s = delay
+    mujoco, band, model, data = _attach_mujoco_sim(robot)
+    band.point = np.array([0.0, 0.0, 1.0])
+    return robot, mujoco, band, model, data
+
+
+def test_sim_start_config_defaults_and_validation():
+    cfg = UnitreeG1Config()
+    assert cfg.sim_start_offset == (0.0, 0.0, 0.0)
+    assert cfg.sim_start_randomize == (0.0, 0.0)
+    with pytest.raises(ValueError, match="sim_start_randomize"):
+        UnitreeG1Config(sim_start_randomize=(-0.1, 0.0))
+    with pytest.raises(ValueError, match="sim_start_offset"):
+        UnitreeG1Config(sim_start_offset=(1.0, 2.0))
+
+
+def test_sim_start_config_parses_from_cli():
+    draccus = pytest.importorskip("draccus")
+    cfg = draccus.parse(
+        UnitreeG1Config, args=["--sim_start_offset=[-1.0,0,15]", "--sim_start_randomize=[0.1,10]"]
+    )
+    assert cfg.sim_start_offset == (-1.0, 0.0, 15.0)
+    assert cfg.sim_start_randomize == (0.1, 10.0)
+
+
+def test_sim_start_sampling_is_within_bounds_and_varies(unitree_g1, caplog):
+    robot, *_ = _start_robot(unitree_g1, offset=(-1.0, 0.5, 20.0), randomize=(0.1, 5.0))
+    robot._seed_sim_start(0)
+    samples = []
+    with caplog.at_level("INFO"):
+        for _ in range(200):
+            robot._request_sim_start()
+            samples.append(robot.sim_start)
+    xs, ys, yaws = np.array(samples).T
+    assert np.all(np.abs(xs + 1.0) <= 0.1) and np.all(np.abs(ys - 0.5) <= 0.1)
+    assert np.all(np.abs(yaws - 20.0) <= 5.0)
+    assert xs.std() > 0.01 and yaws.std() > 0.5
+    assert caplog.text.count("Sim start sampled") == 200
+
+
+def test_sim_start_seed_hook_is_deterministic(unitree_g1):
+    robot, *_ = _start_robot(unitree_g1, randomize=(0.2, 10.0))
+    robot._seed_sim_start(7)
+    robot._request_sim_start()
+    first = robot.sim_start
+    robot._seed_sim_start(7)
+    robot._request_sim_start()
+    assert robot.sim_start == first
+
+
+def test_sim_start_applied_on_first_poll_to_qpos_and_band(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1, offset=(-1.0, 0.5, 40.0))
+    data.qpos[2] = 0.77
+    data.qvel[:] = 0.3
+    data.qpos[7] = 0.4
+    spawn = model.qpos0.copy()
+    _poll_at(robot, 0.0)
+    assert np.allclose(data.qpos[:2], spawn[:2] + [-1.0, 0.5])
+    assert _euler(mujoco, data.qpos[3:7])[2] == pytest.approx(
+        _euler(mujoco, spawn[3:7])[2] + np.radians(40.0)
+    )
+    assert data.qpos[2] == pytest.approx(0.77) and data.qpos[7] == pytest.approx(0.4)
+    assert np.all(data.qvel[:6] == 0.0)
+    assert np.allclose(band.point, [spawn[0] - 1.0, spawn[1] + 0.5, 1.0])
+    assert robot.sim_start == pytest.approx((-1.0, 0.5, 40.0))
+    # One start per attach: later polls leave the robot alone
+    data.qpos[0] = 9.0
+    _poll_at(robot, 1.0)
+    assert data.qpos[0] == 9.0
+
+
+def test_sim_start_reapplied_with_new_sample_on_gamepad_reset(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1, randomize=(0.3, 0.0))
+    robot.msg = unitree_g1[1]["lowcmd_default"]
+    robot._seed_sim_start(1)
+    _poll_at(robot, 0.0)
+    first = robot.sim_start
+    robot._reset_requested = True
+    _poll_at(robot, 1.0)
+    second = robot.sim_start
+    assert second != first
+    assert np.allclose(data.qpos[:2], model.qpos0[:2] + second[:2])
+    assert np.allclose(band.point[:2], model.qpos0[:2] + second[:2])
+
+
+def test_sim_start_requested_by_reset_is_applied_by_next_poll(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1, offset=(-2.0, 0.0, 0.0))
+    _poll_at(robot, 0.0)
+    robot.config.sim_start_offset = (-3.0, 0.0, 0.0)
+    robot.sim_env.reset.reset_mock()
+    robot.publish_lowcmd = MagicMock()
+    robot.reset()
+    assert data.qpos[0] == pytest.approx(model.qpos0[0] - 2.0)  # nothing moved off the sim thread
+    _poll_at(robot, 1.0)
+    assert data.qpos[0] == pytest.approx(model.qpos0[0] - 3.0)
+    assert band.point[0] == pytest.approx(model.qpos0[0] - 3.0)
+
+
+def test_sim_replace_goes_to_the_sampled_start(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1, offset=(-1.0, 0.25, -30.0))
+    _poll_at(robot, 0.0)
+    band.enable = False
+    _poll_at(robot, 10.0)
+    _displace(mujoco, data)
+    _poll_at(robot, 12.0)
+    assert np.allclose(data.qpos[:2], model.qpos0[:2] + [-1.0, 0.25])
+    yaw = _euler(mujoco, data.qpos[3:7])[2]
+    assert yaw == pytest.approx(_euler(mujoco, model.qpos0[3:7])[2] + np.radians(-30.0), abs=1e-6)
+
+
+def test_sim_start_zero_config_is_the_old_behaviour(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1)
+    original_advance = band.Advance
+    _displace(mujoco, data)
+    _poll_at(robot, 0.0)
+    assert data.qpos[0] == 2.0  # nothing moved on attach
+    assert np.array_equal(band.point, [0.0, 0.0, 1.0])
+    assert band.Advance is original_advance
+    assert robot.sim_start is None
+    band.enable = False
+    _poll_at(robot, 1.0)
+    _poll_at(robot, 3.0)
+    assert np.allclose(data.qpos[:2], model.qpos0[:2])
+
+
+def test_sim_start_noop_on_real_robot(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1, offset=(-1.0, 0.0, 0.0))
+    robot.config.is_simulation = False
+    robot._request_sim_start()
+    assert robot.sim_start is None and robot._sim_start_pending is False
+
+
+def test_sim_start_band_yaw_hook_holds_the_start_yaw():
+    pytest.importorskip("scipy")
+    from scipy.spatial.transform import Rotation
+
+    class Band:
+        kp_ang, kd_ang = 1000, 10
+
+        def Advance(self, pose):  # noqa: N802
+            rotvec = Rotation.from_quat([pose[4], pose[5], pose[6], pose[3]]).as_rotvec()
+            return np.concatenate([np.zeros(3), -self.kp_ang * rotvec - self.kd_ang * pose[10:13]])
+
+    with _mocked_unitree_g1() as (robot, _):
+        band = Band()
+        robot._sim_start_rel = (0.0, 0.0, np.radians(60.0))
+        robot._hook_band_yaw(band)
+        robot._hook_band_yaw(band)  # idempotent
+        quat = Rotation.from_euler("z", 60.0, degrees=True).as_quat()
+        at_start = np.concatenate([[0, 0, 1], [quat[3], quat[0], quat[1], quat[2]], np.zeros(6)])
+        assert np.allclose(band.Advance(at_start)[3:], 0.0, atol=1e-9)  # no twist back to world yaw 0
+        quat = Rotation.from_euler("z", 70.0, degrees=True).as_quat()
+        off = np.concatenate([[0, 0, 1], [quat[3], quat[0], quat[1], quat[2]], np.zeros(6)])
+        torque = band.Advance(off)[3:]
+        assert torque[2] == pytest.approx(-1000 * np.radians(10.0))
+
+
+def test_provenance_records_sim_start(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.sim_start_offset = (-1.0, 0.0, 5.0)
+    robot.config.sim_start_randomize = (0.1, 3.0)
+    emb = robot.provenance()["embodiment"]
+    assert emb["sim_start_offset"] == [-1.0, 0.0, 5.0]
+    assert emb["sim_start_randomize"] == [0.1, 3.0]
+
+
+def test_not_ready_reason_and_ready_while_settling(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1)
+    robot.config.controller = "GrootLocomotionController"
+    _poll_at(robot, 0.0)
+    assert robot.not_ready_reason() == "band" and robot.ready_to_record() is False
+    band.enable = False
+    _poll_at(robot, 10.0)  # release seen, deadline 12.0
+    assert robot.not_ready_reason() == "settling" and robot.ready_to_record() is False
+    _poll_at(robot, 11.9)
+    assert robot.not_ready_reason() == "settling"
+    _poll_at(robot, 12.0)
+    assert robot.not_ready_reason() is None and robot.ready_to_record() is True
+    band.enable = True
+    _poll_at(robot, 13.0)
+    assert robot.not_ready_reason() == "band"
+
+
+def test_settling_between_release_and_first_poll_and_without_replacement(unitree_g1):
+    robot, mujoco, band, model, data = _start_robot(unitree_g1)
+    _poll_at(robot, 0.0)
+    band.enable = False  # released, poll has not seen it yet
+    assert robot.not_ready_reason() == "settling"
+    robot.config.sim_replace_after_release_s = None
+    assert robot.not_ready_reason() is None
+
+
+def test_never_settling_on_real_robot_or_without_band(unitree_g1):
+    robot, *_ = _start_robot(unitree_g1)
+    robot._replace_pending = True
+    robot.sim_env.simulator.sim_env.elastic_band = None
+    assert robot.not_ready_reason() is None
+    robot.config.is_simulation = False
+    assert robot.ready_to_record() is True

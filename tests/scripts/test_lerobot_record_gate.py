@@ -163,3 +163,39 @@ def test_wait_clears_waiting_for_on_stop_and_does_not_notify_when_ready():
     ready = Recorder(0)
     wait_until_ready(Plain(), ready, make_events(), play_sounds=False)
     assert ready.statuses == []
+
+
+class SettlingRobot:
+    def __init__(self, reason):
+        self.reason = reason
+
+    def ready_to_record(self):
+        return self.reason is None
+
+    def not_ready_reason(self):
+        return self.reason
+
+
+def test_not_ready_codes_distinguish_settling_from_the_band():
+    notready = lerobot_record._not_ready
+    assert [c for c, _ in notready(SettlingRobot("settling"), Plain())] == ["robot_settling"]
+    assert "settling after the band release" in notready(SettlingRobot("settling"), Plain())[0][1]
+    assert [c for c, _ in notready(SettlingRobot("band"), Plain())] == ["robot"]
+    assert "release the sim band" in notready(SettlingRobot("band"), Plain())[0][1]
+    assert notready(SettlingRobot(None), Plain()) == []
+    # A robot without not_ready_reason keeps the plain "robot" code
+    assert [c for c, _ in notready(Ready(None), Plain())] == ["robot"]
+
+
+def test_wait_reports_robot_settling_code():
+    robot, teleop = SettlingRobot("settling"), Recorder(0)
+    calls = {"n": 0}
+
+    def loop(**kwargs):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            robot.reason = None
+
+    with patch("lerobot.scripts.lerobot_record.record_loop", side_effect=loop):
+        wait_until_ready(robot, teleop, make_events(), play_sounds=False)
+    assert [s["waiting_for"] for s in teleop.statuses] == [["robot_settling"], []]

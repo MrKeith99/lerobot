@@ -474,17 +474,21 @@ class RecordSession:
 
 
 def _not_ready(robot, teleop) -> list[tuple[str, str]]:
-    """(code, hint) per component whose `ready_to_record()` is False; code is "robot" or "teleop"."""
+    """(code, hint) per component whose `ready_to_record()` is False; code is "robot", "robot_settling" or "teleop"."""
     missing = []
     ready = getattr(robot, "ready_to_record", None)
     if callable(ready) and not ready():
-        missing.append(
-            (
-                "robot",
-                "robot: start locomotion / release the sim band (Quest: hold both grips 1 s while disengaged; "
-                "sim: gamepad / viewer key 9 also work)",
+        reason = getattr(robot, "not_ready_reason", None)
+        if callable(reason) and reason() == "settling":
+            missing.append(("robot_settling", "robot: settling after the band release"))
+        else:
+            missing.append(
+                (
+                    "robot",
+                    "robot: start locomotion / release the sim band (Quest: hold both grips 1 s while "
+                    "disengaged; sim: gamepad / viewer key 9 also work)",
+                )
             )
-        )
     for t in teleop if isinstance(teleop, list) else [teleop]:
         ready = getattr(t, "ready_to_record", None)
         if callable(ready) and not ready():
@@ -500,7 +504,7 @@ def components_not_ready(robot, teleop) -> list[str]:
 def wait_until_ready(robot, teleop, events, play_sounds: bool = True, **record_loop_kwargs) -> None:
     """Teleoperate without recording until robot and teleop are ready or stop is requested.
 
-    While waiting, the teleoperators get `waiting_for` (codes "robot" / "teleop" of what is missing, in
+    While waiting, the teleoperators get `waiting_for` (codes "robot" / "robot_settling" / "teleop" of what is missing, in
     `on_record_status`) whenever it changes, and `[]` once the wait is over.
     """
     missing = _not_ready(robot, teleop)
