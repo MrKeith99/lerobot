@@ -90,7 +90,7 @@ class UnitreeG1Config(RobotConfig):
     # world's objects at start and on every sim reset. None keeps the sim's own default (0).
     sim_world_randomize: float | None = None
     # Simulation only: the sim's WORLD_GRASP, "attach" (the object sticks to a hand that closes on it) or
-    # "physics" (finger contacts only). None keeps the sim's own default (attach).
+    # "physics" (finger contacts only). None keeps the sim's own default (physics).
     sim_world_grasp: str | None = None
 
     # Socket config for ZMQ bridge
