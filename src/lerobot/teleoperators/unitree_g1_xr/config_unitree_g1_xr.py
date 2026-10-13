@@ -65,6 +65,8 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     # Sim only: disengage and reset the sim at the end of every episode (the robot ignores the reset on
     # hardware or with --robot.sim_reset_button=null).
     reset_sim_on_episode_end: bool = True
+    # A pressed to disengage also ends the episode as a success (like the right stick click).
+    end_episode_on_disengage: bool = True
 
     def __post_init__(self) -> None:
         if self.band_toggle_hold_s <= 0:

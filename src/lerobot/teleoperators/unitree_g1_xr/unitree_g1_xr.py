@@ -22,7 +22,7 @@ joints held at the robot's first observed pose), `kHeadYaw/Pitch.q` with a pan/t
 closure plus its joint targets, the navigation command and remote axes, and `kBaseHeight.cmd`.
 
 Controllers: A engages/disengages (recentering on the operator's facing direction and starting from the
-measured arm pose), triggers close the hands, the left stick walks, the right stick's x turns, X/Y held lower/raise the base, and the
+measured arm pose; disengaging also ends the episode as success), triggers close the hands, the left stick walks, the right stick's x turns, X/Y held lower/raise the base, and the
 right/left stick clicks end the episode as success/rerecord. Hand tracking has no buttons: it engages
 once, when tracking first starts. Targets hold while tracking is lost.
 """
@@ -179,7 +179,10 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._last_t = None
         print(f"Unitree G1 XR teleop ({cfg.body}, {cfg.end_effector}, {cfg.head_mount}, {cfg.head_sensor}):")
         print("  Headset browser: https://<this host>:8012 (or https://vuer.ai?ws=wss://<this host>:8012)")
-        print("  A: engage / disengage (face the robot's forward direction first)")
+        print(
+            "  A: engage / disengage (face the robot's forward direction first)"
+            + ("; disengaging ends the episode" if cfg.end_episode_on_disengage else "")
+        )
         print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
         print("  Right / left stick click: end episode success / rerecord")
         print(
@@ -361,6 +364,8 @@ class UnitreeG1XRTeleop(Teleoperator):
             if self._engaged:
                 self._engaged = False
                 logger.info("XR teleop disengaged")
+                if self.config.end_episode_on_disengage:
+                    self._pending_events.add(TeleopEvents.SUCCESS)
             elif frame.tracking:
                 self._engage()
         if self.config.input_mode == "hand" and not self._auto_engaged and frame.tracking:

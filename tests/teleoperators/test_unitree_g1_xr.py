@@ -281,6 +281,25 @@ def test_stick_clicks_end_the_episode(clock):
     assert teleop.get_teleop_events()[TeleopEvents.RERECORD_EPISODE]
 
 
+def test_disengaging_with_a_ends_the_episode(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    assert not teleop.get_teleop_events()[TeleopEvents.TERMINATE_EPISODE]
+    press(teleop, clock, "a")
+    events = teleop.get_teleop_events()
+    assert not teleop.engaged
+    assert events[TeleopEvents.SUCCESS] and events[TeleopEvents.TERMINATE_EPISODE]
+
+
+def test_disengaging_keeps_the_episode_when_disabled(clock):
+    teleop = make_teleop(clock, end_episode_on_disengage=False)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    press(teleop, clock, "a")
+    assert not teleop.get_teleop_events()[TeleopEvents.TERMINATE_EPISODE]
+
+
 def test_hand_tracking_engages_when_tracking_starts(clock):
     teleop = make_teleop(clock, input_mode="hand")
     step(teleop, clock, XRFrame(tracking=False))
