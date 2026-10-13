@@ -161,6 +161,7 @@ from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
 from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.keyboard_input import init_keyboard_listener
+from lerobot.utils.provenance import write_provenance
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.utils import (
     init_logging,
@@ -520,6 +521,9 @@ def record(
         if teleop is not None:
             teleop.connect()
         robot.connect()
+        # Which code produced the data (sim/worlds revisions are known once the robot is connected). A resumed
+        # dataset keeps only the latest session's file.
+        write_provenance(robot, dataset.root)
 
         listener, events = init_keyboard_listener()
 

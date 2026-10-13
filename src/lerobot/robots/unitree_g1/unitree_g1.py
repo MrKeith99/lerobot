@@ -32,6 +32,7 @@ import numpy as np
 from lerobot.cameras import make_cameras_from_configs
 from lerobot.lerobot_types import RobotAction, RobotObservation
 from lerobot.utils.import_utils import _unitree_sdk_available, require_package
+from lerobot.utils.provenance import code_info, lerobot_info
 
 from ..robot import Robot
 from .config_unitree_g1 import UnitreeG1Config
@@ -943,6 +944,37 @@ class UnitreeG1(Robot):
                     self.controller_input[key] = action[key]
             if self._base_height_enabled and BASE_HEIGHT_KEY in action:
                 self.controller_input[BASE_HEIGHT_KEY] = action[BASE_HEIGHT_KEY]
+
+    def provenance(self) -> dict:
+        """The code and embodiment that produce this robot's data, stored next to recorded datasets.
+
+        In simulation the sim and world entries are read off the loaded env, so call this after `connect()`.
+        """
+        cfg = self.config
+        info: dict = {"lerobot": lerobot_info()}
+        if cfg.is_simulation:
+            sim_cfg = getattr(getattr(self.sim_env, "simulator", None), "sim_env", None)
+            sim_cfg = getattr(sim_cfg, "config", None) or {}
+            # The hub env class is built inside env.py, so its code object names the snapshot's env.py.
+            env_file = getattr(getattr(type(self.sim_env), "reset", None), "__code__", None)
+            if env_file is not None:
+                info["sim"] = code_info(Path(env_file.co_filename).parent)
+            world_xml = sim_cfg.get("WORLD_PATH")
+            if world_xml:
+                world_dir = Path(world_xml).parent
+                # A downloaded world is <snapshot>/worlds/<name>/world.xml; a checkout's root is 2 levels up.
+                info["world"] = {"name": world_dir.name, **code_info(world_dir.parent.parent)}
+        info["embodiment"] = {
+            "body": cfg.body,
+            "end_effector": cfg.end_effector,
+            "head_mount": cfg.head_mount,
+            "head_sensor": cfg.head_sensor,
+            "controller": cfg.controller,
+            "sim_world": cfg.sim_world,
+            "sim_world_grasp": cfg.sim_world_grasp,
+            "sim_world_randomize": cfg.sim_world_randomize,
+        }
+        return info
 
     @property
     def is_calibrated(self) -> bool:

@@ -914,3 +914,51 @@ def test_sim_band_release_none_never_releases(unitree_g1):
     assert robot._band_release_deadline is None
     _poll_at(robot, 1e9)
     assert band.enable is True
+
+
+def _fake_sim_env(env_file, world_xml):
+    """A stand-in env whose `reset` was compiled from `env_file`, like the hub env's closure class."""
+    namespace: dict = {}
+    exec(compile("class Env:\n    def reset(self):\n        pass\n", str(env_file), "exec"), namespace)
+    env = namespace["Env"]()
+    env.simulator = MagicMock()
+    env.simulator.sim_env.config = {"WORLD_PATH": str(world_xml)}
+    return env
+
+
+def test_provenance_of_sim_from_hub_snapshots(unitree_g1, tmp_path):
+    robot, _ = unitree_g1
+    hub = tmp_path / "hub"
+    sim_dir = hub / "models--k-valentin--unitree-g1-mujoco" / "snapshots" / "simsha"
+    worlds_snap = hub / "models--k-valentin--unitree-g1-mujoco-worlds" / "snapshots" / "worldsha"
+    world_xml = worlds_snap / "worlds" / "w1" / "world.xml"
+    robot.sim_env = _fake_sim_env(sim_dir / "env.py", world_xml)
+    fake_lerobot = {"commit": "abc", "dirty": False}
+    with patch("lerobot.robots.unitree_g1.unitree_g1.lerobot_info", return_value=fake_lerobot):
+        info = robot.provenance()
+    assert info["lerobot"] == {"commit": "abc", "dirty": False}
+    assert info["sim"] == {"repo_id": "k-valentin/unitree-g1-mujoco", "revision": "simsha"}
+    assert info["world"] == {
+        "name": "w1",
+        "repo_id": "k-valentin/unitree-g1-mujoco-worlds",
+        "revision": "worldsha",
+    }
+    assert info["embodiment"]["body"] == robot.config.body
+    assert info["embodiment"]["controller"] == robot.config.controller
+
+
+def test_provenance_of_sim_from_local_checkouts_without_world(unitree_g1, tmp_path):
+    robot, _ = unitree_g1
+    robot.sim_env = _fake_sim_env(tmp_path / "sim" / "env.py", "")
+    robot.sim_env.simulator.sim_env.config = {"WORLD_PATH": ""}
+    info = robot.provenance()
+    assert info["sim"]["path"] == str(tmp_path / "sim")
+    assert "world" not in info
+
+
+def test_provenance_of_real_robot_has_only_lerobot_and_embodiment():
+    from lerobot.robots.unitree_g1.unitree_g1 import UnitreeG1
+
+    robot = UnitreeG1.__new__(UnitreeG1)
+    robot.config = UnitreeG1Config(is_simulation=False)
+    assert set(robot.provenance()) == {"lerobot", "embodiment"}
