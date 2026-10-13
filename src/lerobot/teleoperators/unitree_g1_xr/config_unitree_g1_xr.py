@@ -60,6 +60,9 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     hand_blend_per_s: float = 4.0
     invert_head_pitch: bool = False
     stick_deadzone: float = 0.1
+    # False: the sticks do not walk or turn the robot (kNav* and the walking remote axes are recorded as 0), e.g.
+    # for grasp-only data at the table. X/Y base height still works.
+    walk: bool = True
     # Both grips held this long while disengaged toggle the sim elastic band.
     band_toggle_hold_s: float = 1.0
     # Sim only: disengage and reset the sim at the end of every episode (the robot ignores the reset on

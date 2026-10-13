@@ -271,6 +271,29 @@ def test_sticks_drive_navigation_and_buttons_the_base_height(clock):
     assert step(teleop, clock, small)["kNavVx.cmd"] == 0.0
 
 
+def test_walk_false_zeroes_navigation_and_walking_axes(clock):
+    teleop = make_teleop(clock, walk=False)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    frame = XRFrame(tracking=True, sticks={"left": (0.7, -0.8), "right": (0.5, 0.3)}, buttons={"y": True})
+    action = step(teleop, clock, frame, n=10)
+    for key in ("kNavVx.cmd", "kNavVy.cmd", "kNavYawRate.cmd", "remote.lx", "remote.ly", "remote.rx"):
+        assert action[key] == 0.0
+        assert np.signbit(action[key]) == 0
+    assert action[BASE_HEIGHT_KEY] > GROOT_BASE_HEIGHT_DEFAULT and action["remote.button.0"] == 1.0
+    assert set(action) == set(step(make_teleop(clock), clock))
+
+
+def test_walk_true_keeps_the_remote_axes(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    frame = XRFrame(tracking=True, sticks={"left": (0.0, -0.8), "right": (0.5, 0.0)})
+    action = step(teleop, clock, frame)
+    assert action["remote.ly"] == pytest.approx(0.8)
+    assert action["remote.rx"] == pytest.approx(0.5)
+
+
 def test_stick_clicks_end_the_episode(clock):
     teleop = make_teleop(clock)
     press(teleop, clock, "right_stick")

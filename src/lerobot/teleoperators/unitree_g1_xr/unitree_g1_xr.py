@@ -22,7 +22,8 @@ joints held at the robot's first observed pose), `kHeadYaw/Pitch.q` with a pan/t
 closure plus its joint targets, the navigation command and remote axes, and `kBaseHeight.cmd`.
 
 Controllers: A engages/disengages (recentering on the operator's facing direction and starting from the
-measured arm pose; disengaging also ends the episode as success), triggers close the hands, the left stick walks, the right stick's x turns, X/Y held lower/raise the base, and the
+measured arm pose; disengaging also ends the episode as success), triggers close the hands, the left stick walks, the right stick's x turns (both off with `walk=False`: kNav* and the
+walking remote axes stay 0, the action keys are unchanged), X/Y held lower/raise the base, and the
 right/left stick clicks end the episode as success/rerecord. B (twice within `delete_confirm_s`) deletes:
 the running episode (discarded like a rerecord) while recording, otherwise the last episode saved in this
 session. Hand tracking has no buttons: it engages once, when tracking first starts. Targets hold while
@@ -196,7 +197,13 @@ class UnitreeG1XRTeleop(Teleoperator):
             "  A: engage / disengage (face the robot's forward direction first)"
             + ("; disengaging ends the episode" if cfg.end_episode_on_disengage else "")
         )
-        print("  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base")
+        if cfg.walk:
+            print(
+                "  Triggers: close hands   Left stick: walk   Right stick x: turn   X / Y: lower / raise base"
+            )
+        else:
+            print("  Triggers: close hands   X / Y: lower / raise base")
+            print("  Walking disabled (--teleop.walk=false): the sticks do not walk or turn the robot")
         print("  Right / left stick click: end episode success / rerecord")
         print(
             f"  {cfg.delete_button.upper()} twice (within {cfg.delete_confirm_s:g} s): delete the running "
@@ -505,6 +512,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         )
         if not active:
             axes = dict.fromkeys(REMOTE_AXES, 0.0)
+        elif not self.config.walk:
+            axes |= dict.fromkeys(("remote.lx", "remote.ly", "remote.rx"), 0.0)
         lower = active and frame.buttons.get("x", False)
         raise_ = active and frame.buttons.get("y", False)
         lo, hi = GROOT_BASE_HEIGHT_RANGE
@@ -515,6 +524,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         buttons[_WAIST_RAISE_KEY] = float(raise_)
         buttons[_WAIST_LOWER_KEY] = float(lower)
         nav = nav_from_remote(axes["remote.lx"], axes["remote.ly"], axes["remote.rx"])
+        if not self.config.walk:
+            nav = dict.fromkeys(nav, 0.0)  # no -0.0 from the sign flips
         band_toggle = {
             LOCOMOTION_TOGGLE_KEY: self._band_toggle(frame, dt),
             SIM_RESET_KEY: self._sim_reset(),
