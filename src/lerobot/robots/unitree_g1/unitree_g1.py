@@ -228,6 +228,7 @@ class UnitreeG1(Robot):
         self._reset_was_requested = False
         self._reset_button_was_pressed = False
         self._band_was_attached = False
+        self._band_release_deadline: float | None = None
         self._locomotion_enabled = False
         self._locomotion_toggle_requested = False
         self._locomotion_toggle_was_requested = False
@@ -272,6 +273,11 @@ class UnitreeG1(Robot):
                     motor_cmd.kd = 0.0
                     motor_cmd.tau = 0.0
 
+    def _arm_sim_band_release(self) -> None:
+        """Schedule the automatic band release `sim_band_release_s` from now (no-op when unset)."""
+        delay = self.config.sim_band_release_s
+        self._band_release_deadline = None if delay is None else time.monotonic() + delay
+
     @staticmethod
     def _toggle_sim_band(band) -> None:
         band.enable = not band.enable
@@ -302,6 +308,7 @@ class UnitreeG1(Robot):
         band.enable = True
         band.length = 0
         self.sim_env.reset()
+        self._arm_sim_band_release()
         # Legs go limp right away; the controller loop keeps the policy off until the band is released
         self._make_sim_legs_limp()
         logger.info("Simulation reset: robot back at start pose with elastic band attached")
@@ -321,6 +328,13 @@ class UnitreeG1(Robot):
 
         if reset_requested:
             self._reset_sim(band)
+
+        # One-shot timed release (policy rollouts without a teleop); a manual re-attach afterwards is left alone
+        if self._band_release_deadline is not None and time.monotonic() >= self._band_release_deadline:
+            self._band_release_deadline = None
+            if band.enable:
+                band.enable = False
+                logger.info("Elastic band released")
 
         if joystick is None:
             return
@@ -703,6 +717,10 @@ class UnitreeG1(Robot):
             self._controller_thread.start()
             fps = int(1.0 / self.controller.control_dt)
             logger.info(f"Controller thread started ({fps}Hz)")
+
+        # Timed band release counts from here, once the controller runs (cameras take seconds to connect)
+        if self.config.is_simulation:
+            self._arm_sim_band_release()
 
     def _send_zero_torque(self) -> None:
         """Send a zero-gain command to make joints passive before shutting down."""

@@ -847,3 +847,70 @@ def test_ready_to_record(is_simulation, controller, band_enabled, expected):
         robot.config.is_simulation = is_simulation
         _attach_fake_sim(robot, set(), band_enabled=band_enabled)
         assert robot.ready_to_record() is expected
+
+
+def _poll_at(robot, now: float):
+    with patch("lerobot.robots.unitree_g1.unitree_g1.time.monotonic", return_value=now):
+        robot._poll_sim_gamepad_buttons()
+
+
+def _arm_at(robot, now: float):
+    with patch("lerobot.robots.unitree_g1.unitree_g1.time.monotonic", return_value=now):
+        robot._arm_sim_band_release()
+
+
+def test_sim_band_release_config_validation():
+    assert UnitreeG1Config().sim_band_release_s is None
+    assert UnitreeG1Config(sim_band_release_s=0.0).sim_band_release_s == 0.0
+    with pytest.raises(ValueError, match="sim_band_release_s"):
+        UnitreeG1Config(sim_band_release_s=-1.0)
+
+
+def test_sim_band_release_after_delay_only_once(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.sim_band_release_s = 5.0
+    band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
+    _arm_at(robot, 100.0)
+
+    _poll_at(robot, 104.9)
+    assert band.enable is True
+    assert robot._sim_band_attached() is True
+
+    _poll_at(robot, 105.0)
+    assert band.enable is False
+    assert robot._sim_band_attached() is False
+
+    band.enable = True  # user re-attaches manually: not fought
+    _poll_at(robot, 200.0)
+    assert band.enable is True
+
+
+def test_sim_band_release_rearmed_by_sim_reset(unitree_g1):
+    robot, mocks = unitree_g1
+    robot.msg = mocks["lowcmd_default"]
+    robot.config.sim_band_release_s = 2.0
+    band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
+    _arm_at(robot, 0.0)
+    _poll_at(robot, 2.0)
+    assert band.enable is False
+
+    robot._reset_requested = True
+    with patch("lerobot.robots.unitree_g1.unitree_g1.time.monotonic", return_value=10.0):
+        robot._poll_sim_gamepad_buttons()
+    assert band.enable is True  # reset re-attached it
+    robot.sim_env.reset.assert_called_once_with()
+
+    _poll_at(robot, 11.9)
+    assert band.enable is True
+    _poll_at(robot, 12.0)
+    assert band.enable is False
+
+
+def test_sim_band_release_none_never_releases(unitree_g1):
+    robot, _ = unitree_g1
+    assert robot.config.sim_band_release_s is None
+    band, _ = _attach_fake_sim(robot, set(), band_enabled=True)
+    _arm_at(robot, 0.0)
+    assert robot._band_release_deadline is None
+    _poll_at(robot, 1e9)
+    assert band.enable is True

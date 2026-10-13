@@ -123,6 +123,10 @@ class UnitreeG1Config(RobotConfig):
     # elastic band attached. 9 = Options button on a DualShock 4. None disables it.
     sim_reset_button: int | None = 9
 
+    # Simulation only: release the elastic band this many seconds after connecting and after every sim reset,
+    # for policy rollouts without a teleop. None keeps it attached until toggled.
+    sim_band_release_s: float | None = None
+
     # Without a controller: zero the leg gains so the legs hang passive (e.g. on a gantry).
     freeze_legs: bool = False
 
@@ -157,6 +161,8 @@ class UnitreeG1Config(RobotConfig):
             raise ValueError(f"sim_world_randomize must be >= 0, got {self.sim_world_randomize}")
         if self.sim_world_grasp is not None and self.sim_world_grasp not in ("attach", "physics"):
             raise ValueError(f"sim_world_grasp must be 'attach' or 'physics', got {self.sim_world_grasp!r}")
+        if self.sim_band_release_s is not None and self.sim_band_release_s < 0:
+            raise ValueError(f"sim_band_release_s must be >= 0, got {self.sim_band_release_s}")
         if self.stand_ramp_s <= 0:
             raise ValueError(f"stand_ramp_s must be > 0, got {self.stand_ramp_s}")
         if self.head_default_positions is None:
