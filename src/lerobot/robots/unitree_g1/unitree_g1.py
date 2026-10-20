@@ -846,6 +846,7 @@ class UnitreeG1(Robot):
             for name, value in (
                 ("WORLD", self.config.sim_world),
                 ("WORLD_RANDOMIZE", self.config.sim_world_randomize),
+                ("WORLD_RANDOMIZE_YAW", self.config.sim_world_randomize_yaw),
                 ("WORLD_GRASP", self.config.sim_world_grasp),
             ):
                 if value is not None:
@@ -1195,6 +1196,7 @@ class UnitreeG1(Robot):
             "sim_world": cfg.sim_world,
             "sim_world_grasp": cfg.sim_world_grasp,
             "sim_world_randomize": cfg.sim_world_randomize,
+            "sim_world_randomize_yaw": cfg.sim_world_randomize_yaw,
             "sim_replace_after_release_s": cfg.sim_replace_after_release_s,
             "sim_start_offset": list(cfg.sim_start_offset),
             "sim_start_randomize": list(cfg.sim_start_randomize),

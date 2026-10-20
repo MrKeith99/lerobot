@@ -86,9 +86,12 @@ class UnitreeG1Config(RobotConfig):
     # Simulation only: the sim's WORLD, a world of k-valentin/unitree-g1-mujoco-worlds by name ("pick_cylinder"),
     # "owner/repo[@rev]:name" or a local folder. None keeps the sim's own default, the plain floor.
     sim_world: str | None = None
-    # Simulation only: the sim's WORLD_RANDOMIZE, metres of uniform xy jitter (and +-15 deg yaw) of the
-    # world's objects at start and on every sim reset. None keeps the world's own default (its world.yaml).
+    # Simulation only: the sim's WORLD_RANDOMIZE, metres of uniform xy jitter (and +-sim_world_randomize_yaw) of
+    # the world's objects at start and on every sim reset. None keeps the world's own default (its world.yaml).
     sim_world_randomize: float | None = None
+    # Simulation only: the sim's WORLD_RANDOMIZE_YAW, degrees of uniform yaw jitter about the vertical (objects stay
+    # upright) while sim_world_randomize > 0; 180 gives any heading. None keeps the sim's own default (15).
+    sim_world_randomize_yaw: float | None = None
     # Simulation only: the sim's WORLD_GRASP, "attach" (the object sticks to a hand that closes on it) or
     # "physics" (finger contacts only). None keeps the sim's own default (physics).
     sim_world_grasp: str | None = None
@@ -173,6 +176,8 @@ class UnitreeG1Config(RobotConfig):
             raise ValueError("kp, kd and default_positions must all have length 29")
         if self.sim_world_randomize is not None and self.sim_world_randomize < 0:
             raise ValueError(f"sim_world_randomize must be >= 0, got {self.sim_world_randomize}")
+        if self.sim_world_randomize_yaw is not None and not 0 <= self.sim_world_randomize_yaw <= 180:
+            raise ValueError(f"sim_world_randomize_yaw must be in [0, 180], got {self.sim_world_randomize_yaw}")
         if self.sim_world_grasp is not None and self.sim_world_grasp not in ("attach", "physics"):
             raise ValueError(f"sim_world_grasp must be 'attach' or 'physics', got {self.sim_world_grasp!r}")
         if self.sim_band_release_s is not None and self.sim_band_release_s < 0:
