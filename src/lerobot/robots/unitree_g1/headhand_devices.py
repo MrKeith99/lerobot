@@ -171,7 +171,11 @@ class HeadHandDevice:
     def disconnect(self, disable_torque: bool = False) -> None:
         with self._lock:
             for bus in self._buses:
-                bus.disconnect(disable_torque=disable_torque)
+                if disable_torque and bus is self.hand_bus:
+                    self._hand_torque_off_all()
+                    bus.disconnect(disable_torque=False)
+                else:
+                    bus.disconnect(disable_torque=disable_torque)
 
     def configure(self) -> None:
         with self._lock:
@@ -192,8 +196,24 @@ class HeadHandDevice:
                         bus.enable_torque(allowed)
                 elif enabled:
                     bus.enable_torque()
+                elif bus is self.hand_bus:
+                    self._hand_torque_off_all()
                 else:
                     bus.disable_torque()
+
+    def _hand_torque_off_all(self) -> None:
+        """Torque off every hand servo even when some replies carry an error flag (e.g. input voltage) or a hand is
+        missing: the bus's `disable_torque` stops at the first error and would leave the rest powered. An
+        unacknowledged broadcast goes first, then each servo on its own; errors are logged, never raised."""
+        try:
+            self.hand_bus.sync_write("Torque_Enable", dict.fromkeys(HAND_MOTORS, 0), normalize=False)
+        except Exception as e:  # noqa: BLE001 - the per-servo writes below still run
+            logger.warning("Hand torque-off broadcast failed: %s", e)
+        for name in HAND_MOTORS:
+            try:
+                self.hand_bus.disable_torque(name)
+            except Exception as e:  # noqa: BLE001 - one bad servo must not keep the others powered
+                logger.warning("Hand torque-off %s: %s", name, e)
 
     def read_ticks(self) -> dict[str, int]:
         with self._lock:

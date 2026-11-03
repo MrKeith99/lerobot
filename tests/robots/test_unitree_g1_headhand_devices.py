@@ -196,7 +196,7 @@ def test_set_torque_enables_and_disables_both_buses(device, head_bus_mock, hand_
 
     device.set_torque(False)
     head_bus_mock.disable_torque.assert_called_once()
-    hand_bus_mock.disable_torque.assert_called_once()
+    assert hand_bus_mock.disable_torque.call_count == len(HAND_MOTORS)
 
 
 def test_head_only_device_serves_the_head_motors(head_bus_mock):
@@ -218,7 +218,8 @@ def test_hands_only_device_serves_the_hand_motors(hand_bus_mock):
     dev.connect()
     assert set(dev.read_ticks()) == set(d.HAND_MOTORS)
     dev.set_torque(False)
-    hand_bus_mock.disable_torque.assert_called_once()
+    assert hand_bus_mock.disable_torque.call_count == len(HAND_MOTORS)
+    hand_bus_mock.sync_write.reset_mock()
     dev.write_ticks({"kHeadYaw": 2050})
     hand_bus_mock.sync_write.assert_not_called()
 
@@ -263,7 +264,9 @@ def test_without_limiter_reads_only_positions_and_writes_goals_untouched(head_bu
 
 
 def test_limiter_reads_loads_and_temperature_every_n_cycles(head_bus_mock, hand_bus_mock):
-    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), temp_every=3)
+    dev = _limited_device(
+        head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), temp_every=3
+    )
     _fake_hand_reads(hand_bus_mock)
     head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
     counts = []
@@ -306,7 +309,9 @@ def test_limiter_overload_logs_warning_and_backs_off(head_bus_mock, hand_bus_moc
 
 
 def test_limiter_temperature_torque_off_and_back_on(head_bus_mock, hand_bus_mock):
-    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), temp_every=1)
+    dev = _limited_device(
+        head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), temp_every=1
+    )
     values = _fake_hand_reads(hand_bus_mock, pos=500, temp=70)
     head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
     dev.set_torque(True)
@@ -333,3 +338,32 @@ def test_read_hand_feedback_returns_pos_load_temp(head_bus_mock, hand_bus_mock):
     feedback = dev.read_hand_feedback()
     assert set(feedback) == set(HAND_MOTORS)
     assert feedback[next(iter(HAND_MOTORS))] == (512, -40, 33)
+
+
+def test_hand_torque_off_survives_error_replies_and_missing_servos(hand_bus_mock, caplog):
+    """One servo replying with an error flag (or a missing hand) must not leave the other servos powered."""
+    dev = d.HeadHandDevice(None, "/dev/hand", hand_bus_cls=lambda **kwargs: hand_bus_mock)
+    dev.connect()
+    bad = {"kRightHandMotor3", "kLeftHandMotor11"}
+
+    def _disable(name):
+        if name in bad:
+            raise RuntimeError("[RxPacketError] Input voltage error!")
+
+    hand_bus_mock.disable_torque.side_effect = _disable
+    with caplog.at_level(logging.WARNING):
+        dev.set_torque(False)
+    hand_bus_mock.sync_write.assert_called_once_with(
+        "Torque_Enable", dict.fromkeys(HAND_MOTORS, 0), normalize=False
+    )
+    assert [c.args[0] for c in hand_bus_mock.disable_torque.call_args_list] == list(HAND_MOTORS)
+    assert sum("Input voltage error" in r.message for r in caplog.records) == len(bad)
+
+
+def test_hand_disconnect_with_torque_off_uses_the_safe_path(hand_bus_mock):
+    dev = d.HeadHandDevice(None, "/dev/hand", hand_bus_cls=lambda **kwargs: hand_bus_mock)
+    dev.connect()
+    hand_bus_mock.sync_write.side_effect = ConnectionError("port gone")
+    dev.disconnect(disable_torque=True)
+    assert hand_bus_mock.disable_torque.call_count == len(HAND_MOTORS)
+    hand_bus_mock.disconnect.assert_called_once_with(disable_torque=False)
