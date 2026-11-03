@@ -968,7 +968,6 @@ class _FakeGravityIK:
     """Stand-in for xr_teleoperate's G1ArmIK: gravity torque of joint i is (i + 1) * q_i."""
 
     def __init__(self, body, end_effector, sim_root=None):
-
         self.args = (body, end_effector, sim_root)
         sides = ("left", "right")
         joints = ("shoulder_pitch", "shoulder_roll", "shoulder_yaw", "elbow", "wrist_roll")
@@ -1421,3 +1420,78 @@ def test_never_settling_on_real_robot_or_without_band(unitree_g1):
     assert robot.not_ready_reason() is None
     robot.config.is_simulation = False
     assert robot.ready_to_record() is True
+
+
+class _FakeClock:
+    """Stands in for the `time` module of unitree_g1: a wall clock that only moves when slept or worked."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def perf_counter(self):
+        return self.now
+
+    monotonic = time = perf_counter
+
+    def sleep(self, seconds):
+        self.now += max(seconds, 0.0)
+
+
+class _CostlySim:
+    """A sim env whose step() costs `cost(step_index)` seconds of wall time and advances sim time by sim_dt."""
+
+    def __init__(self, robot, clock, cost, wall_s, sim_dt=0.004):
+        self.robot, self.clock, self.cost, self.wall_s = robot, clock, cost, wall_s
+        self.sim_dt = sim_dt
+        self.simulator = MagicMock()
+        self.simulator.sim_env.mj_data.time = 0.0
+        self.steps = 0
+
+    def step(self):
+        self.clock.now += self.cost(self.steps)
+        self.steps += 1
+        self.simulator.sim_env.mj_data.time = self.steps * self.sim_dt
+        if self.clock.now >= self.wall_s:
+            self.robot._shutdown_event.set()
+
+
+def _run_sim_loop(robot, cost, wall_s=10.0, **config):
+    for key, value in config.items():
+        setattr(robot.config, key, value)
+    clock = _FakeClock()
+    sim = _CostlySim(robot, clock, cost, wall_s)
+    robot.sim_env = sim
+    robot._poll_sim_gamepad_buttons = MagicMock()
+    robot._read_lowstate = MagicMock()
+    with patch("lerobot.robots.unitree_g1.unitree_g1.time", clock):
+        robot._sim_step_loop()
+    return sim, clock
+
+
+def test_sim_keeps_real_time_when_a_render_step_is_slow(unitree_g1):
+    """Every 8th step renders the cameras (6 ms > the 4 ms step): the next steps catch up, sim time = wall time."""
+    robot, _ = unitree_g1
+    sim, clock = _run_sim_loop(robot, lambda i: 0.006 if i % 8 == 0 else 0.0006)
+    assert sim.steps * sim.sim_dt == pytest.approx(clock.now, abs=0.01)
+
+
+def test_sim_drops_the_backlog_past_max_lag_and_warns(unitree_g1, caplog):
+    """Steps that always cost more than sim_dt cannot keep up: the sim falls behind, never fast-forwards."""
+    robot, _ = unitree_g1
+    with caplog.at_level("WARNING"):
+        sim, clock = _run_sim_loop(robot, lambda i: 0.006, wall_s=6.0, sim_max_lag_s=0.1)
+    assert sim.steps * sim.sim_dt == pytest.approx(clock.now * 4 / 6, rel=0.01)
+    assert "Sim real-time factor: 0.667" in caplog.text
+
+
+def test_sim_skips_publishing_the_state_while_catching_up(unitree_g1):
+    """After a 50 ms stall the sim runs the missed steps back to back; the state is read again once caught up."""
+    robot, _ = unitree_g1
+    sim, _ = _run_sim_loop(robot, lambda i: 0.05 if i == 0 else 0.0005, wall_s=1.0)
+    skipped = sim.steps - robot._read_lowstate.call_count
+    assert 10 <= skipped <= 14
+
+
+def test_sim_max_lag_must_be_positive():
+    with pytest.raises(ValueError, match="sim_max_lag_s"):
+        UnitreeG1Config(sim_max_lag_s=0)

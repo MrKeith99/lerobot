@@ -548,45 +548,76 @@ class UnitreeG1(Robot):
             self._reset_sim(band)
 
     def _subscribe_lowstate(self):  # polls robot state @ 250Hz
+        if self.config.is_simulation and self.sim_env is not None:
+            self._sim_step_loop()
+            return
         while not self._shutdown_event.is_set():
             start_time = time.time()
-
-            # Step simulation if in simulation mode
-            if self.config.is_simulation and self.sim_env is not None:
-                self.sim_env.step()
-                self._poll_sim_gamepad_buttons()
-
-            msg = self.lowstate_subscriber.Read()
-            if msg is not None:
-                lowstate = G1_29_LowState()
-
-                # Capture motor states using jointindex
-                for joint in G1_29_JointIndex:
-                    lowstate.motor_state[joint].q = msg.motor_state[joint].q
-                    lowstate.motor_state[joint].dq = msg.motor_state[joint].dq
-                    lowstate.motor_state[joint].tau_est = msg.motor_state[joint].tau_est
-                    lowstate.motor_state[joint].temperature = msg.motor_state[joint].temperature
-
-                # Capture IMU state
-                lowstate.imu_state.quaternion = list(msg.imu_state.quaternion)
-                lowstate.imu_state.gyroscope = list(msg.imu_state.gyroscope)
-                lowstate.imu_state.accelerometer = list(msg.imu_state.accelerometer)
-                lowstate.imu_state.rpy = list(msg.imu_state.rpy)
-                lowstate.imu_state.temperature = msg.imu_state.temperature
-
-                # Capture wireless remote data
-                lowstate.wireless_remote = msg.wireless_remote
-
-                # Capture mode_machine
-                lowstate.mode_machine = msg.mode_machine
-
-                with self._lowstate_lock:
-                    self._lowstate = lowstate
-
+            self._read_lowstate()
             current_time = time.time()
             all_t_elapsed = current_time - start_time
             sleep_time = max(0, (self.control_dt - all_t_elapsed))  # maintain constant control dt
             time.sleep(sleep_time)
+
+    def _sim_step_loop(self) -> None:
+        """Step the sim on a wall-clock schedule so sim time keeps up with wall time (the 50 Hz controller and the
+        30 Hz record / policy loops count wall time). A slow step (camera render every IMAGE_DT, GIL contention)
+        is made up by stepping back to back; past `sim_max_lag_s` the backlog is dropped with a warning. Logs the
+        real-time factor every 5 s."""
+        sim_dt = getattr(self.sim_env, "sim_dt", None)
+        sim_dt = float(sim_dt) if isinstance(sim_dt, (int, float)) and sim_dt > 0 else self.control_dt
+        max_lag = self.config.sim_max_lag_s
+        mj_data = getattr(getattr(getattr(self.sim_env, "simulator", None), "sim_env", None), "mj_data", None)
+        next_t = time.perf_counter()
+        log_t, log_sim, dropped_s = next_t, (float(mj_data.time) if mj_data is not None else None), 0.0
+        while not self._shutdown_event.is_set():
+            self.sim_env.step()
+            self._poll_sim_gamepad_buttons()
+            next_t += sim_dt
+            now = time.perf_counter()
+            lag = now - next_t
+            if lag > max_lag:
+                dropped_s += lag
+                next_t = now
+            if lag < sim_dt:  # caught up: publish the state, then wait for the next step
+                self._read_lowstate()
+            if now - log_t >= 5.0:
+                sim_t = float(mj_data.time) if mj_data is not None else None
+                if sim_t is not None and log_sim is not None and sim_t >= log_sim:
+                    rtf = (sim_t - log_sim) / (now - log_t)
+                    log = logger.warning if dropped_s > 0 else logger.info
+                    log(f"Sim real-time factor: {rtf:.3f} (dropped {dropped_s:.2f}s of backlog)")
+                log_t, log_sim, dropped_s = now, sim_t, 0.0
+            if next_t > now:
+                time.sleep(next_t - now)  # not precise_sleep: its spin would hold the GIL
+
+    def _read_lowstate(self) -> None:
+        msg = self.lowstate_subscriber.Read()
+        if msg is not None:
+            lowstate = G1_29_LowState()
+
+            # Capture motor states using jointindex
+            for joint in G1_29_JointIndex:
+                lowstate.motor_state[joint].q = msg.motor_state[joint].q
+                lowstate.motor_state[joint].dq = msg.motor_state[joint].dq
+                lowstate.motor_state[joint].tau_est = msg.motor_state[joint].tau_est
+                lowstate.motor_state[joint].temperature = msg.motor_state[joint].temperature
+
+            # Capture IMU state
+            lowstate.imu_state.quaternion = list(msg.imu_state.quaternion)
+            lowstate.imu_state.gyroscope = list(msg.imu_state.gyroscope)
+            lowstate.imu_state.accelerometer = list(msg.imu_state.accelerometer)
+            lowstate.imu_state.rpy = list(msg.imu_state.rpy)
+            lowstate.imu_state.temperature = msg.imu_state.temperature
+
+            # Capture wireless remote data
+            lowstate.wireless_remote = msg.wireless_remote
+
+            # Capture mode_machine
+            lowstate.mode_machine = msg.mode_machine
+
+            with self._lowstate_lock:
+                self._lowstate = lowstate
 
     def publish_lowcmd(
         self,

@@ -95,6 +95,10 @@ class UnitreeG1Config(RobotConfig):
     # Simulation only: the sim's WORLD_GRASP, "attach" (the object sticks to a hand that closes on it) or
     # "physics" (finger contacts only). None keeps the sim's own default (physics).
     sim_world_grasp: str | None = None
+    # Simulation only: the physics thread steps on a wall-clock schedule (sim time = wall time) and runs steps
+    # back to back after a slow one (camera render, GIL contention) to catch up. Further behind than this it
+    # drops the backlog and warns, so the sim falls behind instead of fast-forwarding.
+    sim_max_lag_s: float = 0.1
 
     # Socket config for ZMQ bridge
     robot_ip: str = "192.168.123.164"  # default G1 IP
@@ -177,9 +181,13 @@ class UnitreeG1Config(RobotConfig):
         if self.sim_world_randomize is not None and self.sim_world_randomize < 0:
             raise ValueError(f"sim_world_randomize must be >= 0, got {self.sim_world_randomize}")
         if self.sim_world_randomize_yaw is not None and not 0 <= self.sim_world_randomize_yaw <= 180:
-            raise ValueError(f"sim_world_randomize_yaw must be in [0, 180], got {self.sim_world_randomize_yaw}")
+            raise ValueError(
+                f"sim_world_randomize_yaw must be in [0, 180], got {self.sim_world_randomize_yaw}"
+            )
         if self.sim_world_grasp is not None and self.sim_world_grasp not in ("attach", "physics"):
             raise ValueError(f"sim_world_grasp must be 'attach' or 'physics', got {self.sim_world_grasp!r}")
+        if self.sim_max_lag_s <= 0:
+            raise ValueError(f"sim_max_lag_s must be > 0, got {self.sim_max_lag_s}")
         if self.sim_band_release_s is not None and self.sim_band_release_s < 0:
             raise ValueError(f"sim_band_release_s must be >= 0, got {self.sim_band_release_s}")
         if self.sim_replace_after_release_s is not None and self.sim_replace_after_release_s < 0:
