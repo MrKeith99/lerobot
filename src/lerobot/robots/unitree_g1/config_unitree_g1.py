@@ -23,6 +23,7 @@ from .end_effectors import AMAZING_HAND_MOTORS, END_EFFECTORS, HAND_REPRESENTATI
 from .g1_utils import BODIES, G1_LEG_SLOTS, REVISIONS, invalid_sdk_slots
 from .headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT
 from .heads import DEFAULT_HEAD_Q, HEAD_MOTORS, HEAD_MOUNTS, HEAD_SENSORS
+from .safety import LOWSTATE_TIMEOUT_S
 
 _GAINS: dict[str, dict[str, list[float]]] = {
     "left_leg": {
@@ -105,6 +106,19 @@ class UnitreeG1Config(RobotConfig):
 
     # Socket config for ZMQ bridge
     robot_ip: str = "192.168.123.164"  # default G1 IP
+
+    # Real robot only: once the robot state is older than this, stop commanding, send damping and fail the
+    # next get_observation / send_action.
+    lowstate_timeout_s: float = LOWSTATE_TIMEOUT_S
+
+    # Real robot only, experimental: on exit, hold the standing pose and ask the relay (`--handover user-ctrl`
+    # or `select-mode`) to give the robot back to Unitree's locomotion controller instead of damping. If the
+    # relay does not confirm within `handover_timeout_s`, the legs keep holding until Ctrl-C, which damps.
+    handover_on_exit: bool = False
+    # Real robot only: refuse to connect unless the relay reports it holds the robot in damping (no other
+    # client, not handed over, a relay with the damping watchdog).
+    require_damping_at_connect: bool = True
+    handover_timeout_s: float = 20.0
 
     # Cameras (ZMQ-based remote cameras)
     cameras: dict[str, CameraConfig] = field(default_factory=dict)
@@ -203,6 +217,10 @@ class UnitreeG1Config(RobotConfig):
             raise ValueError(f"sim_start_randomize must be (xy_m, yaw_deg), got {self.sim_start_randomize!r}")
         if any(v < 0 for v in self.sim_start_randomize):
             raise ValueError(f"sim_start_randomize must be >= 0, got {self.sim_start_randomize}")
+        if self.handover_timeout_s <= 0:
+            raise ValueError(f"handover_timeout_s must be > 0, got {self.handover_timeout_s}")
+        if self.lowstate_timeout_s <= 0:
+            raise ValueError(f"lowstate_timeout_s must be > 0, got {self.lowstate_timeout_s}")
         if self.stand_ramp_s <= 0:
             raise ValueError(f"stand_ramp_s must be > 0, got {self.stand_ramp_s}")
         if self.head_default_positions is None:

@@ -37,7 +37,6 @@ import time
 from typing import Any
 
 import zmq
-from unitree_sdk2py.comm.motion_switcher.motion_switcher_client import MotionSwitcherClient
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelPublisher, ChannelSubscriber
 from unitree_sdk2py.idl.default import (
     unitree_go_msg_dds__MotorCmd_,
@@ -56,8 +55,17 @@ from unitree_sdk2py.utils.crc import CRC
 from lerobot.cameras.zmq.image_server import ImageServer
 from lerobot.robots.unitree_g1.dex_hands import dex_topics
 from lerobot.robots.unitree_g1.hand_force import add_hand_force_args, hand_force_from_args
+from lerobot.robots.unitree_g1.handover import (
+    DEFAULT_HANDOVER_FSM,
+    HANDOVER_STRATEGIES,
+    Handover,
+    HandoverState,
+    make_strategy,
+    relay_state,
+)
 from lerobot.robots.unitree_g1.headhand_devices import DEFAULT_HAND_PORT, DEFAULT_HEAD_PORT, HeadHandDevice
 from lerobot.robots.unitree_g1.headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT, HeadHandServer
+from lerobot.robots.unitree_g1.safety import LOWCMD_TIMEOUT_S, LowCmdWatchdog, damping_motor_cmds
 from lerobot.robots.unitree_g1.unitree_sdk2_socket import (
     LOWCMD_PORT,
     LOWSTATE_PORT,
@@ -121,8 +129,10 @@ def state_forward_loop(
     lowstate_sock: zmq.Socket,
     state_period: float,
     shutdown_event: threading.Event,
+    handover: Handover | None = None,
+    watchdog: LowCmdWatchdog | None = None,
 ) -> None:
-    """Read observation from DDS and forward to ZMQ clients."""
+    """Read observation from DDS and forward to ZMQ clients (with the relay's handover state)."""
     last_state_time = 0.0
 
     while not shutdown_event.is_set():
@@ -136,6 +146,11 @@ def state_forward_loop(
         if now - last_state_time >= state_period:
             # Convert to dict and serialize with JSON
             state_dict = lowstate_to_dict(msg)
+            if handover is not None:
+                state_dict["relay_handover"] = handover.state.value
+                state_dict["relay_state"] = relay_state(
+                    watchdog is not None and watchdog.forwarding, handover
+                )
             payload = json.dumps({"topic": kTopicLowState, "data": state_dict}).encode("utf-8")
             # if no subscribers / tx buffer full, just drop
             with contextlib.suppress(zmq.Again):
@@ -143,30 +158,108 @@ def state_forward_loop(
             last_state_time = now
 
 
+def damping_lowcmd(mode_machine: int) -> hg_LowCmd:
+    """LowCmd putting every body motor in damping (see `safety.py`)."""
+    return dict_to_lowcmd({"mode_machine": mode_machine, "motor_cmd": damping_motor_cmds()})
+
+
+def publish_lowcmd(pub: ChannelPublisher, crc: CRC, cmd: hg_LowCmd) -> None:
+    cmd.crc = crc.Crc(cmd)
+    pub.Write(cmd)
+
+
 def cmd_forward_loop(
     lowcmd_sock: zmq.Socket,
     lowcmd_pub_debug: ChannelPublisher,
     crc: CRC,
+    watchdog: LowCmdWatchdog,
+    mode_machine: int,
+    damping_period: float = 0.02,
+    shutdown_event: threading.Event | None = None,
+    handover: Handover | None = None,
 ) -> None:
-    """Receive commands from ZMQ and forward to DDS."""
-    while True:
+    """Forward client lowcmds from ZMQ to DDS while the watchdog allows it; otherwise hold damping.
+
+    A lowcmd flagged `handover` asks to give the robot back to Unitree's controller: the relay keeps publishing
+    the client's latest (stand) command, watchdog suspended, while `handover` switches; once done it publishes
+    nothing more. A normal lowcmd from the client cancels a handover in progress or failed.
+    """
+    handover = handover if handover is not None else Handover(None)
+    poller = zmq.Poller()
+    poller.register(lowcmd_sock, zmq.POLLIN)
+    last_damping_t = last_hold_t = float("-inf")
+    hold_cmd: hg_LowCmd | None = None
+    rejected_session: str | None = None
+    print("lowcmd watchdog: damping until a client connects")
+    while shutdown_event is None or not shutdown_event.is_set():
         try:
-            payload = lowcmd_sock.recv()
+            ready = dict(poller.poll(timeout=int(damping_period * 1000)))
         except zmq.ContextTerminated:
             break
-        msg_dict = json.loads(payload.decode("utf-8"))
-
-        topic = msg_dict.get("topic", "")
-        cmd_data = msg_dict.get("data", {})
-
-        # Reconstruct LowCmd object from dict
-        cmd = dict_to_lowcmd(cmd_data)
-
-        # recompute crc
-        cmd.crc = crc.Crc(cmd)
-
-        if topic == kTopicLowCommand_Debug:
-            lowcmd_pub_debug.Write(cmd)
+        now = time.monotonic()
+        if lowcmd_sock in ready:
+            try:
+                payload = lowcmd_sock.recv(zmq.NOBLOCK)
+            except zmq.Again:
+                payload = None
+            except zmq.ContextTerminated:
+                break
+            if payload is not None:
+                msg_dict = json.loads(payload.decode("utf-8"))
+                session = msg_dict.get("session")
+                wants_handover = bool(msg_dict.get("handover"))
+                cmd = dict_to_lowcmd(msg_dict.get("data", {}))
+                if (
+                    msg_dict.get("topic", "") != kTopicLowCommand_Debug
+                    or handover.state == HandoverState.DONE
+                ):
+                    pass
+                elif handover.active:
+                    if session == watchdog.session:
+                        watchdog.on_command(session, now)
+                        if wants_handover:
+                            hold_cmd = cmd
+                        else:
+                            handover.cancel()
+                            print("handover: cancelled by the client, forwarding its commands again")
+                            publish_lowcmd(lowcmd_pub_debug, crc, cmd)
+                else:
+                    was_forwarding = watchdog.forwarding
+                    if watchdog.on_command(session, now):
+                        if not was_forwarding:
+                            print(f"lowcmd watchdog: forwarding client session {session}")
+                        if wants_handover:
+                            handover.request()
+                            if handover.active:
+                                hold_cmd = cmd
+                                print("handover: requested, holding the client's command while switching")
+                        publish_lowcmd(lowcmd_pub_debug, crc, cmd)
+                    elif session != rejected_session:
+                        rejected_session = session
+                        print(
+                            f"lowcmd watchdog: ignoring session {session} (timed out or not the active one)"
+                        )
+        if handover.state == HandoverState.DONE:
+            continue
+        if handover.active:
+            if (
+                hold_cmd is not None
+                and not handover.publishing_stopped.is_set()
+                and now - last_hold_t >= damping_period
+            ):
+                publish_lowcmd(lowcmd_pub_debug, crc, hold_cmd)
+                last_hold_t = now
+            continue
+        was_forwarding = watchdog.forwarding
+        if watchdog.check(now):
+            if was_forwarding:
+                print(
+                    f"lowcmd watchdog: no lowcmd for {watchdog.stale_s(now):.2f}s from session "
+                    f"{watchdog.session}: DAMPING (restart the client to resume)"
+                )
+            if now - last_damping_t >= damping_period:
+                publish_lowcmd(lowcmd_pub_debug, crc, damping_lowcmd(mode_machine))
+                last_damping_t = now
 
 
 def hand_state_to_dict(msg: HandState_ | MotorStates_) -> dict[str, Any]:
@@ -272,6 +365,31 @@ def main() -> None:
     parser.add_argument("--headhand-state-port", type=int, default=HEADHAND_STATE_PORT)
     parser.add_argument("--headhand-cmd-port", type=int, default=HEADHAND_CMD_PORT)
     parser.add_argument("--no-handshake", action="store_true", help="Skip head/hand connect handshake")
+    parser.add_argument(
+        "--handover",
+        choices=HANDOVER_STRATEGIES,
+        default="release",
+        help="How to take control from Unitree's locomotion service and whether a client may hand it back "
+        "(experimental, test on the gantry): release (no handover), user-ctrl, select-mode",
+    )
+    parser.add_argument(
+        "--handover-fsm",
+        type=int,
+        default=DEFAULT_HANDOVER_FSM,
+        help="select-mode only: loco FSM id requested after the handover (default: %(default)s, walk/run)",
+    )
+    parser.add_argument(
+        "--assume-damping",
+        action="store_true",
+        help="Start even though Unitree's loco service cannot confirm damping (it does not answer, e.g. after "
+        "a previous relay released it). Only after checking the robot is in damping.",
+    )
+    parser.add_argument(
+        "--lowcmd-timeout",
+        type=float,
+        default=LOWCMD_TIMEOUT_S,
+        help="Damping once no lowcmd arrived for this many seconds (default: %(default)s)",
+    )
     add_hand_force_args(parser)
     args = parser.parse_args()
     if args.camera and args.camera_type == "intelrealsense" and not args.camera_serial:
@@ -289,17 +407,6 @@ def main() -> None:
 
     # initialize DDS
     ChannelFactoryInitialize(0)
-
-    # stop all active publishers on the robot
-    msc = MotionSwitcherClient()
-    msc.SetTimeout(5.0)
-    msc.Init()
-
-    status, result = msc.CheckMode()
-    while result is not None and "name" in result and result["name"]:
-        msc.ReleaseMode()
-        status, result = msc.CheckMode()
-        time.sleep(1.0)
 
     crc = CRC()
 
@@ -320,8 +427,21 @@ def main() -> None:
             time.sleep(0.05)
     if first_state is None:
         print("warning: no lowstate received within 5 s; mode_machine unknown")
+        mode_machine = 0
     else:
-        print(f"mode_machine={first_state.mode_machine}")
+        mode_machine = int(first_state.mode_machine)
+        print(f"mode_machine={mode_machine}")
+
+    # take low-level control from Unitree's locomotion service, then damp at once
+    take_control, give_back = make_strategy(args.handover, args.handover_fsm, args.assume_damping)
+    try:
+        take_control()
+    except RuntimeError as e:
+        print(f"error: {e}")
+        raise SystemExit(1) from e
+    handover = Handover(give_back)
+    publish_lowcmd(lowcmd_pub_debug, crc, damping_lowcmd(mode_machine))
+    print(f"low-level control taken ({args.handover}); handover {'enabled' if handover.supported else 'off'}")
 
     # initialize ZMQ
     ctx = zmq.Context.instance()
@@ -334,13 +454,14 @@ def main() -> None:
     lowstate_sock = ctx.socket(zmq.PUB)
     lowstate_sock.bind(f"tcp://0.0.0.0:{LOWSTATE_PORT}")
 
+    watchdog = LowCmdWatchdog(args.lowcmd_timeout)
     state_period = 0.002  # ~500 hz
     shutdown_event = threading.Event()
 
     # start observation forwarding in background thread
     t_state = threading.Thread(
         target=state_forward_loop,
-        args=(lowstate_sub, lowstate_sock, state_period, shutdown_event),
+        args=(lowstate_sub, lowstate_sock, state_period, shutdown_event, handover, watchdog),
     )
     t_state.start()
 
@@ -373,10 +494,28 @@ def main() -> None:
 
     # run command forwarding in main thread
     try:
-        cmd_forward_loop(lowcmd_sock, lowcmd_pub_debug, crc)
+        cmd_forward_loop(
+            lowcmd_sock,
+            lowcmd_pub_debug,
+            crc,
+            watchdog,
+            mode_machine,
+            shutdown_event=shutdown_event,
+            handover=handover,
+        )
     except KeyboardInterrupt:
         print("shutting down bridge...")
     finally:
+        # Leave the robot in damping, never in the last client command or zero torque, unless it was handed
+        # over to Unitree's controller.
+        if handover.state == HandoverState.DONE:
+            print("robot left with Unitree's controller (handed over)")
+        else:
+            for _ in range(5):
+                with contextlib.suppress(Exception):
+                    publish_lowcmd(lowcmd_pub_debug, crc, damping_lowcmd(mode_machine))
+                time.sleep(0.01)
+            print("robot left in damping")
         shutdown_event.set()
         ctx.term()  # terminates blocking zmq.recv() calls
         t_state.join(timeout=2.0)

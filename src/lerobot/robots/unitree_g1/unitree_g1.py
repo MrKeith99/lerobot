@@ -57,6 +57,7 @@ from .g1_utils import (
 )
 from .headhand import LEGACY_MOTOR_NAMES, HeadHandBridge
 from .heads import HEAD_KEYS
+from .safety import DAMPING_KD
 
 if TYPE_CHECKING or _unitree_sdk_available:
     from unitree_sdk2py.core.channel import (
@@ -253,6 +254,20 @@ class UnitreeG1(Robot):
         self._stand_start_q: np.ndarray | None = None
         self._stand_start_t = 0.0
         self._leg_hold_q: np.ndarray | None = None
+
+        # Real robot safety: age of the last lowstate, the latched fault, and damping (once sent, no other
+        # command goes out). The keepalive republishes the last command when no controller thread does.
+        self.msg = None
+        self._lowstate_t = 0.0
+        self._fault: str | None = None
+        self._damping = False
+        self._commanded = False
+        self._keepalive_thread: threading.Thread | None = None
+        # Stops the controller and keepalive threads only (the state thread runs on during a handover).
+        self._publish_stop = threading.Event()
+        self._relay_handover: str | None = None
+        self._relay_state: str | None = None
+        self._hold_q: list[float] | None = None
 
     @property
     def _locomotion_gated(self) -> bool:
@@ -616,8 +631,127 @@ class UnitreeG1(Robot):
             # Capture mode_machine
             lowstate.mode_machine = msg.mode_machine
 
+            handover = getattr(msg, "relay_handover", None)
+            relay_state = getattr(msg, "relay_state", None)
             with self._lowstate_lock:
                 self._lowstate = lowstate
+                self._lowstate_t = time.monotonic()
+                self._relay_handover = handover if isinstance(handover, str) else None
+                self._relay_state = relay_state if isinstance(relay_state, str) else None
+
+    def _lowstate_fault(self, now: float) -> bool:
+        """Real robot: latch a fault and go to damping once the lowstate is older than `lowstate_timeout_s`."""
+        if self.config.is_simulation:
+            return False
+        if self._fault is None:
+            with self._lowstate_lock:
+                age = now - self._lowstate_t
+            if age > self.config.lowstate_timeout_s:
+                self._fault = f"robot state is {age:.2f}s old (limit {self.config.lowstate_timeout_s}s)"
+                logger.error(f"[UnitreeG1] {self._fault}: robot in DAMPING. Restart the client to resume.")
+                self._send_damping()
+        return self._fault is not None
+
+    def _raise_if_faulted(self) -> None:
+        if self._fault is not None:
+            raise RuntimeError(f"UnitreeG1 stopped in damping: {self._fault}")
+
+    def _send_damping(self) -> None:
+        """Put every body motor in damping (kp 0, kd > 0, tau 0) and block every later command."""
+        if self.msg is None:
+            return
+        try:
+            with self._lowcmd_lock:
+                self._damping = True
+                for motor in G1_29_JointIndex:
+                    if motor.value in self._invalid_slots:
+                        continue
+                    cmd = self.msg.motor_cmd[motor.value]
+                    cmd.mode = 1
+                    cmd.kp = 0.0
+                    cmd.kd = DAMPING_KD[motor.value]
+                    cmd.dq = 0.0
+                    cmd.tau = 0.0
+                self.msg.crc = self.crc.Crc(self.msg)
+                self.lowcmd_publisher.Write(self.msg)
+            logger.info("[UnitreeG1] Sent damping command")
+        except Exception as e:
+            logger.error(f"[UnitreeG1] Failed to send damping: {e}")
+
+    def _write_stand_hold(self, handover: bool) -> None:
+        """Hold the legs and waist stiffly at their measured pose (arms keep their last targets)."""
+        with self._lowstate_lock:
+            lowstate = self._lowstate
+        kp = getattr(self.controller, "kp", None) if self.controller is not None else None
+        kd = getattr(self.controller, "kd", None) if self.controller is not None else None
+        kp = self.kp if kp is None else kp
+        kd = self.kd if kd is None else kd
+        with self._lowcmd_lock:
+            if self._damping:
+                return
+            if self._hold_q is None and lowstate is not None:
+                self._hold_q = [float(lowstate.motor_state[i].q) for i in range(15)]
+            for i in range(15):
+                if i in self._invalid_slots:
+                    continue
+                cmd = self.msg.motor_cmd[i]
+                cmd.mode = 1
+                if self._hold_q is not None:
+                    cmd.q = self._hold_q[i]
+                cmd.kp = float(kp[i])
+                cmd.kd = float(kd[i])
+                cmd.tau = 0.0
+            self.msg.crc = self.crc.Crc(self.msg)
+            self.lowcmd_publisher.Write(self.msg, handover=handover)
+
+    def _hand_over(self) -> None:
+        """Hold the standing pose and ask the relay to hand the robot to Unitree's controller; without its
+        confirmation within `handover_timeout_s`, keep holding until Ctrl-C, then damp."""
+        self._hold_q = None
+        deadline = time.monotonic() + self.config.handover_timeout_s
+        logger.info("[UnitreeG1] Handing the robot over to Unitree's controller...")
+        state = None
+        try:
+            while True:
+                now = time.monotonic()
+                if self._lowstate_fault(now):
+                    return
+                with self._lowstate_lock:
+                    state = self._relay_handover
+                if state == "done":
+                    logger.info("[UnitreeG1] Handover done: Unitree's controller has the robot.")
+                    return
+                if state in ("failed", "unsupported") or now > deadline:
+                    break
+                self._write_stand_hold(handover=True)
+                time.sleep(0.02)
+            logger.error(
+                f"[UnitreeG1] Handover {state if state in ('failed', 'unsupported') else 'not confirmed'}: the legs "
+                "hold the standing pose stiffly. Put the robot on the gantry, then press Ctrl-C to damp."
+            )
+            while not self._lowstate_fault(time.monotonic()):
+                self._write_stand_hold(handover=False)
+                time.sleep(0.02)
+        except KeyboardInterrupt:
+            logger.warning("[UnitreeG1] Ctrl-C during the handover: damping")
+            self._send_damping()
+
+    def _republish_lowcmd(self) -> None:
+        """Send the current command message again (the last targets, or damping once sent)."""
+        with self._lowcmd_lock:
+            self.msg.crc = self.crc.Crc(self.msg)
+            self.lowcmd_publisher.Write(self.msg)
+
+    def _keepalive_loop(self) -> None:
+        """Real robot without a controller: republish at 50 Hz so the relay's watchdog sees a live client even
+        while the main loop pauses (episode save), and watch the lowstate age."""
+        period = 0.02
+        while not (self._shutdown_event.is_set() or self._publish_stop.is_set()):
+            start = time.monotonic()
+            faulted = self._lowstate_fault(start)
+            if faulted or self._commanded:
+                self._republish_lowcmd()
+            time.sleep(max(0.0, period - (time.monotonic() - start)))
 
     def publish_lowcmd(
         self,
@@ -627,6 +761,9 @@ class UnitreeG1(Robot):
         tau: np.ndarray | list[float] | None = None,
     ) -> None:  # writes robot command whenever requested
         with self._lowcmd_lock:
+            if self._damping:
+                return
+            self._commanded = True
             for motor in G1_29_JointIndex:
                 key = f"{motor.name}.q"
                 # Slots the body has no motor for keep the zero gains set on connect.
@@ -788,8 +925,13 @@ class UnitreeG1(Robot):
         loop_count = 0
         last_log_time = time.time()
 
-        while not self._shutdown_event.is_set():
+        while not (self._shutdown_event.is_set() or self._publish_stop.is_set()):
             start_time = time.time()
+
+            if self._lowstate_fault(time.monotonic()):
+                self._republish_lowcmd()
+                time.sleep(max(0, control_dt - (time.time() - start_time)))
+                continue
 
             with self._lowstate_lock:
                 lowstate = self._lowstate
@@ -841,6 +983,25 @@ class UnitreeG1(Robot):
                 f"mode_machine={mode_machine} does not match revision {self.config.revision!r} "
                 f"(expected {expected}); pass --robot.revision=<base|rev_1_0>"
             )
+
+    def _check_relay_damping(self) -> None:
+        """Real robot: the relay must hold the robot in damping before this client commands anything."""
+        if self.config.is_simulation or not self.config.require_damping_at_connect:
+            return
+        with self._lowstate_lock:
+            state = self._relay_state
+        if state == "damping":
+            logger.info("[UnitreeG1] Relay reports the robot in damping")
+            return
+        hint = {
+            None: "the relay does not report its state (an image without the damping watchdog?)",
+            "forwarding": "another client is commanding the robot",
+            "handover": "a handover to Unitree's controller is in progress",
+            "handed_over": "the robot was handed to Unitree's controller; restart the relay",
+        }.get(state, f"unknown relay state {state!r}")
+        self.msg = None  # disconnect() then sends nothing
+        self.disconnect()
+        raise RuntimeError(f"Robot not confirmed in damping: {hint}. Nothing was sent.")
 
     def _connect_head_hand(self, calibrate: bool) -> None:
         try:
@@ -920,6 +1081,11 @@ class UnitreeG1(Robot):
 
         logger.info(f"Connected {len(self._cameras)} camera(s).")
 
+        self._fault = None
+        self._damping = False
+        self._commanded = False
+        self._publish_stop.clear()
+
         # Initialize lowcmd message
         self.crc = CRC()
         self.msg = unitree_hg_msg_dds__LowCmd_()
@@ -938,6 +1104,7 @@ class UnitreeG1(Robot):
                 time.sleep(0.01)
         logger.info("[UnitreeG1] Connected to robot.")
         self._check_mode_machine(lowstate.mode_machine)
+        self._check_relay_damping()
         self.msg.mode_machine = lowstate.mode_machine
 
         self.kp = np.array(self.config.kp, dtype=np.float32)
@@ -957,24 +1124,13 @@ class UnitreeG1(Robot):
             self._controller_thread.start()
             fps = int(1.0 / self.controller.control_dt)
             logger.info(f"Controller thread started ({fps}Hz)")
+        elif not self.config.is_simulation:
+            self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+            self._keepalive_thread.start()
 
         # Timed band release counts from here, once the controller runs (cameras take seconds to connect)
         if self.config.is_simulation:
             self._arm_sim_band_release()
-
-    def _send_zero_torque(self) -> None:
-        """Send a zero-gain command to make joints passive before shutting down."""
-        try:
-            with self._lowstate_lock:
-                lowstate = self._lowstate
-            if lowstate is None:
-                return
-            action = {f"{motor.name}.q": lowstate.motor_state[motor.value].q for motor in G1_29_JointIndex}
-            zero_gains = np.zeros(29, dtype=np.float32)
-            self.publish_lowcmd(action, kp=zero_gains, kd=zero_gains, tau=zero_gains)
-            logger.info("Sent zero-torque command for safe shutdown")
-        except Exception as e:
-            logger.warning(f"Failed to send zero-torque on disconnect: {e}")
 
     def disconnect(self):
         if self.headhand is not None:
@@ -984,24 +1140,33 @@ class UnitreeG1(Robot):
         if self._shutdown_event.is_set():  # already disconnected
             return
 
-        # Put robot in passive mode before stopping threads
-        if not self.config.is_simulation:
-            self._send_zero_torque()
+        # Stop every thread that publishes lowcmd first, so nothing can follow the damping command.
+        self._publish_stop.set()
+        for thread, name in ((self._controller_thread, "Controller"), (self._keepalive_thread, "Keepalive")):
+            if thread is not None:
+                thread.join(timeout=2.0)
+                if thread.is_alive():
+                    logger.warning(f"{name} thread did not stop cleanly")
 
-        # Signal thread to stop and unblock any waits
-        self._shutdown_event.set()
+        # Real robot: hand over to Unitree's controller if asked, else leave it in damping, never zero torque.
+        try:
+            if not self.config.is_simulation:
+                if self.config.handover_on_exit and self._fault is None and self.msg is not None:
+                    try:
+                        self._hand_over()
+                    except Exception as e:
+                        logger.error(f"[UnitreeG1] Handover failed ({e}): damping")
+                        self._send_damping()
+                else:
+                    self._send_damping()
+        finally:
+            self._shutdown_event.set()
 
         # Wait for subscribe thread to finish
         if self.subscribe_thread is not None:
             self.subscribe_thread.join(timeout=2.0)
             if self.subscribe_thread.is_alive():
                 logger.warning("Subscribe thread did not stop cleanly")
-
-        # Wait for controller thread to finish
-        if self._controller_thread is not None:
-            self._controller_thread.join(timeout=2.0)
-            if self._controller_thread.is_alive():
-                logger.warning("Controller thread did not stop cleanly")
 
         # Close simulation environment
         if self.config.is_simulation and self.sim_env is not None:
@@ -1032,6 +1197,7 @@ class UnitreeG1(Robot):
             self._lowstate = None
 
     def get_observation(self) -> RobotObservation:
+        self._raise_if_faulted()
         with self._lowstate_lock:
             lowstate = self._lowstate
         if lowstate is None:
@@ -1105,6 +1271,7 @@ class UnitreeG1(Robot):
     def send_action(self, action: RobotAction) -> RobotAction:
         """Command the body, head and hand from one action. Hand closures are expanded to joint targets;
         returns the action with the head/hand targets as sent (clamped)."""
+        self._raise_if_faulted()
         action = dict(action)
         self._request_sim_band_toggle(action)
         self._request_locomotion_toggle(action)

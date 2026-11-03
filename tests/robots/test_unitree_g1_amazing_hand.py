@@ -80,6 +80,7 @@ def _make_lowstate_msg_mock(mode_machine: int = 4):
     msg.imu_state.temperature = 25.0
     msg.wireless_remote = b"\x00" * 40
     msg.mode_machine = mode_machine
+    msg.relay_state = "damping"  # the relay holds the robot in damping until a client commands it
     return msg
 
 

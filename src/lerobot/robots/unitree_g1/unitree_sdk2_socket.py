@@ -17,6 +17,7 @@
 import base64
 import json
 import threading
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -28,9 +29,14 @@ from .config_unitree_g1 import UnitreeG1Config
 # Only one robot connection per process is supported.
 _ctx: zmq.Context | None = None
 _robot_ip: str | None = None
+# Tags every command of this connection, so the relay's watchdog can tell a fresh client from a stalled one.
+_session: str | None = None
 
 LOWCMD_PORT = 6000
 LOWSTATE_PORT = 6001
+
+# State reads give up after this long and return None, so a dead link cannot block the reader forever.
+READ_TIMEOUT_MS = 100
 
 # DDS topic names follow Unitree SDK naming conventions
 # ruff: noqa: N816
@@ -95,6 +101,10 @@ class LowStateMsg:
         wireless_b64 = data.get("wireless_remote", "")
         self.wireless_remote: bytes = base64.b64decode(wireless_b64) if wireless_b64 else b""
         self.mode_machine: int = data.get("mode_machine", 0)
+        # The relay's handover state ("idle", "holding", "done", ...); None from relays without handover.
+        self.relay_handover: str | None = data.get("relay_handover")
+        # What the relay does with the robot: "damping", "forwarding", "handover" or "handed_over".
+        self.relay_state: str | None = data.get("relay_state")
 
 
 class MotorStatesMsg:
@@ -138,13 +148,14 @@ def ChannelFactoryInitialize(domain_id: int = 0, config: Any = None) -> None:  #
         domain_id: Ignored (for API compatibility with Unitree SDK)
         config: UnitreeG1Config instance with robot_ip
     """
-    global _ctx, _robot_ip
+    global _ctx, _robot_ip, _session
 
     # read socket config
     if config is None:
         config = UnitreeG1Config()
     _robot_ip = config.robot_ip
     _ctx = zmq.Context.instance()
+    _session = uuid.uuid4().hex
 
 
 def _socket(kind: int, topic: str) -> zmq.Socket:
@@ -168,12 +179,16 @@ class ChannelPublisher:
         """Connect the command socket of this topic."""
         self._sock = _socket(zmq.PUSH, self.topic)
 
-    def Write(self, msg: Any) -> None:  # noqa: N802
-        """Serialize and send a command message to the robot."""
+    def Write(self, msg: Any, handover: bool = False) -> None:  # noqa: N802
+        """Serialize and send a command message to the robot; `handover` asks the relay to give the robot
+        back to Unitree's controller while holding this command."""
         if self._sock is None:
             raise RuntimeError("Init must be called first")
 
-        payload = json.dumps(lowcmd_to_dict(self.topic, msg)).encode("utf-8")
+        data = {**lowcmd_to_dict(self.topic, msg), "session": _session}
+        if handover:
+            data["handover"] = True
+        payload = json.dumps(data).encode("utf-8")
         self._sock.send(payload)
 
 
@@ -195,8 +210,8 @@ class ChannelSubscriber:
         """Connect the state socket of this topic, and start delivering to `handler` if given."""
         self._sock = _socket(zmq.SUB, self.topic)
         self._sock.setsockopt_string(zmq.SUBSCRIBE, "")
+        self._sock.setsockopt(zmq.RCVTIMEO, READ_TIMEOUT_MS)
         if handler is not None:
-            self._sock.setsockopt(zmq.RCVTIMEO, 100)
             self._thread = threading.Thread(target=self._deliver, args=(handler,), daemon=True)
             self._thread.start()
 
@@ -214,11 +229,15 @@ class ChannelSubscriber:
                 break
             handler(self._decode(payload))
 
-    def Read(self) -> LowStateMsg | MotorStatesMsg:  # noqa: N802
-        """Receive and deserialize a state message from the robot."""
+    def Read(self) -> LowStateMsg | MotorStatesMsg | None:  # noqa: N802
+        """Receive and deserialize a state message from the robot; None if none arrived within
+        `READ_TIMEOUT_MS`."""
         if self._sock is None:
             raise RuntimeError("Init must be called first")
-        return self._decode(self._sock.recv())
+        try:
+            return self._decode(self._sock.recv())
+        except zmq.Again:
+            return None
 
     def Close(self) -> None:  # noqa: N802
         self._stop.set()
