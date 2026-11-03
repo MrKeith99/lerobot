@@ -1495,3 +1495,42 @@ def test_sim_skips_publishing_the_state_while_catching_up(unitree_g1):
 def test_sim_max_lag_must_be_positive():
     with pytest.raises(ValueError, match="sim_max_lag_s"):
         UnitreeG1Config(sim_max_lag_s=0)
+
+
+def _connect_and_capture_cameras(robot):
+    fake_inner_env = MagicMock()
+    fake_inner_env.simulator = None
+    seen = {}
+
+    def fake_make_env(*args, **kwargs):
+        seen["cameras"] = os.environ.get("UNITREE_G1_MUJOCO_CAMERAS")
+        return {"hub_env": {0: MagicMock(envs=[fake_inner_env])}}
+
+    with patch("lerobot.envs.make_env", side_effect=fake_make_env):
+        robot.connect()
+    return seen["cameras"]
+
+
+def _zmq(name):
+    from lerobot.cameras.zmq.configuration_zmq import ZMQCameraConfig
+
+    return ZMQCameraConfig(server_address="127.0.0.1", port=5555, camera_name=name)
+
+
+def test_sim_renders_only_the_cameras_the_robot_reads(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.cameras = {"head_camera": _zmq("head_camera"), "table": _zmq("table_view")}
+    assert _connect_and_capture_cameras(robot) == "head_camera,table_view,"
+    assert "UNITREE_G1_MUJOCO_CAMERAS" not in os.environ
+
+
+def test_sim_cameras_override_the_robot_cameras(unitree_g1):
+    robot, _ = unitree_g1
+    robot.config.cameras = {"head_camera": _zmq("head_camera")}
+    robot.config.sim_cameras = ["head_camera", "room_view"]
+    assert _connect_and_capture_cameras(robot) == "head_camera,room_view,"
+
+
+def test_sim_keeps_its_own_cameras_without_robot_cameras(unitree_g1):
+    robot, _ = unitree_g1
+    assert _connect_and_capture_cameras(robot) is None

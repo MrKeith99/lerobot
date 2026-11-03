@@ -861,6 +861,13 @@ class UnitreeG1(Robot):
             else:
                 self.calibrate()
 
+    def _sim_camera_names(self) -> list[str]:
+        """Cameras the sim should render: `sim_cameras`, else the ones this robot reads ([] = sim default)."""
+        if self.config.sim_cameras is not None:
+            return list(self.config.sim_cameras)
+        names = [getattr(cfg, "camera_name", key) for key, cfg in self.config.cameras.items()]
+        return list(dict.fromkeys(names))
+
     def connect(self, calibrate: bool = True) -> None:  # connect to DDS
         # Initialize DDS channel and simulation environment
         if self.config.is_simulation:
@@ -882,6 +889,10 @@ class UnitreeG1(Robot):
             ):
                 if value is not None:
                     embodiment[f"UNITREE_G1_MUJOCO_{name}"] = str(value)
+            sim_cameras = self._sim_camera_names()
+            if sim_cameras:
+                # The sim splits a list on commas; the trailing one keeps a single name a list.
+                embodiment["UNITREE_G1_MUJOCO_CAMERAS"] = ",".join(sim_cameras) + ","
             with _env_vars(embodiment):
                 self._env_wrapper = make_env(self.config.sim_env_repo_id, trust_remote_code=True)
             # Extract the actual gym env from the dict structure

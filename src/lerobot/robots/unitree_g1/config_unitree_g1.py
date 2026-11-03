@@ -95,6 +95,9 @@ class UnitreeG1Config(RobotConfig):
     # Simulation only: the sim's WORLD_GRASP, "attach" (the object sticks to a hand that closes on it) or
     # "physics" (finger contacts only). None keeps the sim's own default (physics).
     sim_world_grasp: str | None = None
+    # Simulation only: the cameras the sim renders and publishes (its CAMERAS). None: the `camera_name`s of
+    # `cameras` (rendering a camera nobody reads slows the physics thread), or the sim's own list without cameras.
+    sim_cameras: list[str] | None = None
     # Simulation only: the physics thread steps on a wall-clock schedule (sim time = wall time) and runs steps
     # back to back after a slow one (camera render, GIL contention) to catch up. Further behind than this it
     # drops the backlog and warns, so the sim falls behind instead of fast-forwarding.
