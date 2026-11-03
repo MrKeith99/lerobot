@@ -47,6 +47,8 @@ SIM_RESET_KEY = "sim.reset"
 # Feedback entry the record/teleoperate scripts add to a G1 observation for the teleoperator: the robot's
 # `robot_type`, e.g. for an XR teleop to refuse a robot of another embodiment.
 ROBOT_TYPE_FEEDBACK_KEY = "robot_type"
+# Feedback entry next to it: True when the robot is the MuJoCo sim (sim-only teleop behaviour stays off otherwise).
+ROBOT_IS_SIM_FEEDBACK_KEY = "robot_is_simulation"
 
 
 def nav_from_remote(lx: float, ly: float, rx: float) -> dict[str, float]:

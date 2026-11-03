@@ -60,6 +60,7 @@ from lerobot.robots.unitree_g1.g1_utils import (
     REMOTE_AXES,
     REMOTE_BUTTONS,
     REMOTE_KEYS,
+    ROBOT_IS_SIM_FEEDBACK_KEY,
     ROBOT_TYPE_FEEDBACK_KEY,
     SIM_RESET_KEY,
     nav_from_remote,
@@ -127,6 +128,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._catching_up = False
         self._auto_engaged = False
         self._robot_type_checked = False
+        # Only a robot that reports itself simulated gets the end-of-episode sim reset and resync.
+        self._robot_is_sim = False
         self._synced_to_robot = False
         self._warned_no_camera = False
         self._measured: dict[str, float] = {}
@@ -395,6 +398,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         """Check the embodiment, track the measured arm pose and, on the first full observation, hold every
         target at the robot's pose."""
         self._render_camera(feedback)
+        if ROBOT_IS_SIM_FEEDBACK_KEY in feedback:
+            self._robot_is_sim = bool(feedback[ROBOT_IS_SIM_FEEDBACK_KEY])
         if not all(key in feedback for key in BODY_KEYS):
             return
         self._check_embodiment(feedback)
@@ -482,7 +487,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         return 1.0
 
     def on_episode_end(self) -> None:
-        if not self.config.reset_sim_on_episode_end:
+        # On hardware the reset is impossible and the resync would let the arms sag a step further each time.
+        if not self.config.reset_sim_on_episode_end or not self._robot_is_sim:
             return
         self._engaged = False
         self._catching_up = False

@@ -74,8 +74,8 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     lock: tuple[str, ...] = ()
     # Both grips held this long while disengaged toggle the sim elastic band.
     band_toggle_hold_s: float = 1.0
-    # Sim only: disengage and reset the sim at the end of every episode (the robot ignores the reset on
-    # hardware or with --robot.sim_reset_button=null).
+    # Sim only: disengage and reset the sim at the end of every episode. Skipped on hardware (the robot reports
+    # it is not simulated): the operator stays engaged. The sim ignores it with --robot.sim_reset_button=null.
     reset_sim_on_episode_end: bool = True
     # A pressed to disengage also ends the episode as a success (like the right stick click).
     end_episode_on_disengage: bool = True

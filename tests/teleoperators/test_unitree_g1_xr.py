@@ -29,6 +29,7 @@ from lerobot.robots.unitree_g1.g1_utils import (  # noqa: E402
     BODY_KEYS,
     GROOT_BASE_HEIGHT_DEFAULT,
     LOCOMOTION_TOGGLE_KEY,
+    ROBOT_IS_SIM_FEEDBACK_KEY,
     ROBOT_TYPE_FEEDBACK_KEY,
     SIM_RESET_KEY,
 )
@@ -99,6 +100,7 @@ def observation(**values):
     obs.update(dict.fromkeys(HEAD_KEYS, 0.0))
     obs.update(dict.fromkeys(HAND_CLOSURE_KEYS, 0.0))
     obs[ROBOT_TYPE_FEEDBACK_KEY] = ROBOT_TYPE
+    obs[ROBOT_IS_SIM_FEEDBACK_KEY] = True
     obs.update(values)
     return obs
 
@@ -544,6 +546,7 @@ def test_episode_end_disengages_and_resets_the_sim_once(clock):
 
 def test_episode_end_logs_one_info_line(clock, caplog):
     teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
     with caplog.at_level("INFO"):
         teleop.on_episode_end()
     assert [r.getMessage() for r in caplog.records] == ["Episode ended: disengaged, resetting the sim"]
@@ -564,6 +567,7 @@ def test_episode_end_starts_the_resync_window(clock):
 
 def test_episode_end_cancels_the_grip_hold(clock):
     teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
     assert toggles(teleop, clock, grips_frame(), 30) == [0.0] * 30
     teleop.on_episode_end()
     assert teleop._grips_held_s == 0.0
@@ -578,6 +582,23 @@ def test_episode_end_does_nothing_when_the_option_is_off(clock):
     teleop.on_episode_end()
     assert teleop.engaged
     assert [step(teleop, clock, XRFrame(tracking=True))[SIM_RESET_KEY] for _ in range(100)] == [0.0] * 100
+
+
+@pytest.mark.parametrize("feedback", [{ROBOT_IS_SIM_FEEDBACK_KEY: False}, {}])
+def test_episode_end_on_hardware_stays_engaged_without_reset_or_resync(clock, feedback):
+    teleop = make_teleop(clock)
+    key = BODY_KEYS[0]
+    obs = observation(**feedback)
+    if not feedback:
+        del obs[ROBOT_IS_SIM_FEEDBACK_KEY]
+    teleop.send_feedback(obs)
+    press(teleop, clock, "a")
+    teleop.on_episode_end()
+    assert teleop.engaged
+    assert [step(teleop, clock, XRFrame(tracking=True))[SIM_RESET_KEY] for _ in range(50)] == [0.0] * 50
+    press(teleop, clock, "a")
+    teleop.send_feedback({**obs, key: 0.7})
+    assert step(teleop, clock)[key] != pytest.approx(0.7)
 
 
 def events_of(teleop):

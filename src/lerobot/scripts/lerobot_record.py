@@ -139,7 +139,7 @@ from lerobot.robots import (  # noqa: F401
     unitree_g1 as unitree_g1_robot,
 )
 from lerobot.robots.unitree_g1 import UnitreeG1
-from lerobot.robots.unitree_g1.g1_utils import ROBOT_TYPE_FEEDBACK_KEY
+from lerobot.robots.unitree_g1.g1_utils import ROBOT_IS_SIM_FEEDBACK_KEY, ROBOT_TYPE_FEEDBACK_KEY
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
     TeleoperatorConfig,
@@ -334,7 +334,13 @@ def record_loop(
             if dataset is not None:
                 notify_record_status(teleop, elapsed_s=timestamp)
             if isinstance(robot, UnitreeG1):
-                teleop.send_feedback({**obs, ROBOT_TYPE_FEEDBACK_KEY: robot.name})
+                teleop.send_feedback(
+                    {
+                        **obs,
+                        ROBOT_TYPE_FEEDBACK_KEY: robot.name,
+                        ROBOT_IS_SIM_FEEDBACK_KEY: robot.config.is_simulation,
+                    }
+                )
             act = teleop.get_action()
             apply_teleop_events(teleop, events)
             # Only outside an episode (the teleop turns B into a re-record while recording).

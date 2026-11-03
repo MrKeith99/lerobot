@@ -102,7 +102,7 @@ from lerobot.robots import (  # noqa: F401
     unitree_g1 as unitree_g1_robot,
 )
 from lerobot.robots.unitree_g1 import UnitreeG1
-from lerobot.robots.unitree_g1.g1_utils import ROBOT_TYPE_FEEDBACK_KEY
+from lerobot.robots.unitree_g1.g1_utils import ROBOT_IS_SIM_FEEDBACK_KEY, ROBOT_TYPE_FEEDBACK_KEY
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
     TeleoperatorConfig,
@@ -200,7 +200,13 @@ def teleop_loop(
         obs = robot.get_observation()
 
         if isinstance(robot, UnitreeG1):
-            teleop.send_feedback({**obs, ROBOT_TYPE_FEEDBACK_KEY: robot.name})
+            teleop.send_feedback(
+                {
+                    **obs,
+                    ROBOT_TYPE_FEEDBACK_KEY: robot.name,
+                    ROBOT_IS_SIM_FEEDBACK_KEY: robot.config.is_simulation,
+                }
+            )
 
         # Get teleop action
         raw_action = teleop.get_action()
