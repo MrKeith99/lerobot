@@ -43,7 +43,7 @@ def test_decode_scs_load():
 
 
 def test_error_cap_both_directions_and_passthrough():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     assert step(lim, 600, 500)[0] == 530
     assert step(lim, 400, 500)[0] == 470
     assert step(lim, 510, 500)[0] == 510
@@ -51,7 +51,7 @@ def test_error_cap_both_directions_and_passthrough():
 
 
 def test_short_overload_spike_does_not_latch():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     for _ in range(5):
         assert step(lim, 600, 500, load=800)[0] == 530
     assert step(lim, 600, 500, load=100)[0] == 530
@@ -60,7 +60,7 @@ def test_short_overload_spike_does_not_latch():
 
 
 def test_overload_latches_after_overload_s_and_backs_off():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     results = [step(lim, 600, 500, load=800, dt=0.1) for _ in range(3)]
     assert [r[0] for r in results[:2]] == [530, 530]
     goal, _, events = results[2]
@@ -69,7 +69,7 @@ def test_overload_latches_after_overload_s_and_backs_off():
 
 
 def test_overload_back_off_direction_when_pushing_down():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     goal = None
     for _ in range(3):
         goal, _, _ = step(lim, 400, 500, load=-800, dt=0.1)
@@ -77,7 +77,7 @@ def test_overload_back_off_direction_when_pushing_down():
 
 
 def test_hold_while_latched_then_unlatch_on_opening_command():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     for _ in range(3):
         step(lim, 600, 500, load=800, dt=0.1)
     for pos in (495, 485, 485):
@@ -91,7 +91,7 @@ def test_hold_while_latched_then_unlatch_on_opening_command():
 
 
 def test_unlatch_when_goal_near_present_on_release_side():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     for _ in range(3):
         step(lim, 600, 500, load=800, dt=0.1)
     goal, _, events = step(lim, 490, 495)
@@ -100,13 +100,13 @@ def test_unlatch_when_goal_near_present_on_release_side():
 
 
 def test_overload_without_error_never_latches():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     for _ in range(20):
         assert step(lim, 500, 500, load=900, dt=0.1)[0] == 500
 
 
 def test_temperature_torque_off_with_hysteresis():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     assert step(lim, 600, 500, temp=64)[1] is False
     goal, off, events = step(lim, 600, 500, temp=65)
     assert off is True and goal == 500 and len(events) == 1
@@ -118,13 +118,13 @@ def test_temperature_torque_off_with_hysteresis():
 
 
 def test_missing_feedback_passes_goal_through():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     goals, off, _ = lim.limit({N: 900}, {}, {}, {}, 0.02)
     assert goals == {N: 900} and off == {N: False}
 
 
 def test_servos_are_independent():
-    lim = HandForceLimiter()
+    lim = HandForceLimiter(max_err_ticks=30, load_limit=500)
     for _ in range(3):
         goals, _, _ = lim.limit(
             {"a": 600, "b": 600}, {"a": 500, "b": 500}, {"a": 800, "b": 0}, {"a": 30, "b": 30}, 0.1
@@ -139,6 +139,7 @@ def test_flags_default_on_and_parse():
     args = parser.parse_args([])
     assert args.hand_force_limit is True
     assert hand_force_from_args(args) == HandForceLimiter()
+    assert (args.hand_max_err_ticks, args.hand_load_limit) == (15, 300)
 
     args = parser.parse_args(
         ["--hand-max-err-ticks", "20", "--hand-load-limit", "400", "--hand-overload-s", "0.5"]

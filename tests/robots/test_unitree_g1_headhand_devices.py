@@ -263,7 +263,7 @@ def test_without_limiter_reads_only_positions_and_writes_goals_untouched(head_bu
 
 
 def test_limiter_reads_loads_and_temperature_every_n_cycles(head_bus_mock, hand_bus_mock):
-    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(), temp_every=3)
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), temp_every=3)
     _fake_hand_reads(hand_bus_mock)
     head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
     counts = []
@@ -279,7 +279,7 @@ def test_limiter_reads_loads_and_temperature_every_n_cycles(head_bus_mock, hand_
 
 
 def test_limiter_caps_hand_goals_but_not_head_goals(head_bus_mock, hand_bus_mock):
-    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter())
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500))
     _fake_hand_reads(hand_bus_mock, pos=500)
     head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
     dev.read_ticks()
@@ -292,7 +292,7 @@ def test_limiter_caps_hand_goals_but_not_head_goals(head_bus_mock, hand_bus_mock
 def test_limiter_overload_logs_warning_and_backs_off(head_bus_mock, hand_bus_mock, caplog, monkeypatch):
     clock = iter(range(1000))
     monkeypatch.setattr(d.time, "monotonic", lambda: next(clock) * 0.1)
-    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter())
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500))
     _fake_hand_reads(hand_bus_mock, pos=500, load=800)
     head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
     dev.read_ticks()
@@ -306,7 +306,7 @@ def test_limiter_overload_logs_warning_and_backs_off(head_bus_mock, hand_bus_moc
 
 
 def test_limiter_temperature_torque_off_and_back_on(head_bus_mock, hand_bus_mock):
-    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(), temp_every=1)
+    dev = _limited_device(head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), temp_every=1)
     values = _fake_hand_reads(hand_bus_mock, pos=500, temp=70)
     head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
     dev.set_torque(True)

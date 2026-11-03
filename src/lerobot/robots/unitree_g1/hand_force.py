@@ -44,8 +44,10 @@ def _sign(value: int) -> int:
 
 @dataclass
 class HandForceLimiter:
-    max_err_ticks: int = 30
-    load_limit: int = 500
+    # Tuned on hardware (2026-11-03): holds a Pringles tube and a PET bottle without denting, even closing at
+    # full speed; 20 / 400 dented the tube. The error cap does the limiting; the back-off rarely fires.
+    max_err_ticks: int = 15
+    load_limit: int = 300
     overload_s: float = 0.3
     backoff_ticks: int = 15
     temp_limit_c: int = 65
