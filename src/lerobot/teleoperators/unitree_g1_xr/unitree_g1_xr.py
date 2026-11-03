@@ -24,7 +24,9 @@ closure plus its joint targets, the navigation command and remote axes, and `kBa
 Controllers: A engages/disengages (recentering on the operator's facing direction and starting from the
 measured arm pose; disengaging also ends the episode as success), triggers close the hands, the left stick walks, the right stick's x turns (both off with `walk=False`: kNav* and the
 walking remote axes stay 0, the action keys are unchanged), X/Y held lower/raise the base, and the
-right/left stick clicks end the episode as success/rerecord. B (twice within `delete_confirm_s`) deletes:
+right/left stick clicks end the episode as success/rerecord. Parts in `lock` (head, left/right arm, left/right
+hand) ignore the operator and hold the robot's pose from the last sync (first observation, sim reset); their
+keys stay in the action. B (twice within `delete_confirm_s`) deletes:
 the running episode (discarded like a rerecord) while recording, otherwise the last episode saved in this
 session. Hand tracking has no buttons: it engages once, when tracking first starts. Targets hold while
 tracking is lost.
@@ -112,6 +114,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         self.arm_ik = arm_ik
         self._retarget = None
         self._head = config.head_mount == "pan_tilt"
+        self._locked = frozenset(config.lock)
 
         self._target: dict[str, float] = dict.fromkeys(BODY_KEYS, 0.0)
         self._target[BASE_HEIGHT_KEY] = GROOT_BASE_HEIGHT_DEFAULT
@@ -214,6 +217,8 @@ class UnitreeG1XRTeleop(Teleoperator):
             f"  Both grips {cfg.band_toggle_hold_s:g} s (disengaged): start / stop locomotion "
             "(sim: release / attach the band)"
         )
+        if self._locked:
+            print(f"  Locked (held at the robot's reset pose): {', '.join(cfg.lock)}")
         if cfg.display_mode == "pass-through":
             print("  Headset shows pass-through (--teleop.display_mode=ego|immersive for the head camera)")
         else:
@@ -432,6 +437,8 @@ class UnitreeG1XRTeleop(Teleoperator):
         max_step = speed * dt
         gap = 0.0
         for name, q in zip(self.arm_ik.joint_names, solution.q, strict=True):
+            if f"{name.split('_', 1)[0]}_arm" in self._locked:
+                continue
             key = arm_key(name)
             self._target[key] = _step_toward(self._target[key], float(q), max_step)
             gap = max(gap, abs(self._target[key] - float(q)))
@@ -448,6 +455,8 @@ class UnitreeG1XRTeleop(Teleoperator):
     def _step_hands(self, frame: Any, dt: float) -> None:
         max_step = self.config.hand_blend_per_s * dt
         for side in HAND_SIDES:
+            if f"{side}_hand" in self._locked:
+                continue
             closure = self._retarget(frame.hands[side])
             if closure is not None:
                 self._set_closure(side, _step_toward(self._target[hand_closure_key(side)], closure, max_step))
@@ -518,7 +527,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         active = self._engaged and frame.tracking
         if active:
             self._step_arms(frame, dt)
-            if self._head:
+            if self._head and "head" not in self._locked:
                 self._step_head(frame, dt)
             if self.hand_spec is not None:
                 self._step_hands(frame, dt)

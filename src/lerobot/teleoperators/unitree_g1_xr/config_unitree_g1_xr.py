@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lerobot.robots.unitree_g1.end_effectors import END_EFFECTORS
+from lerobot.robots.unitree_g1.end_effectors import END_EFFECTORS, HAND_SPECS
 from lerobot.robots.unitree_g1.g1_utils import BODIES
 from lerobot.robots.unitree_g1.heads import HEAD_MOUNTS, HEAD_SENSORS
 
@@ -26,6 +26,8 @@ from ..config import TeleoperatorConfig
 
 INPUT_MODES = ("controller", "hand")
 DISPLAY_MODES = ("pass-through", "ego", "immersive")
+# Parts `lock` can hold still.
+LOCK_PARTS = ("head", "left_arm", "right_arm", "left_hand", "right_hand")
 
 
 @TeleoperatorConfig.register_subclass("unitree_g1_xr")
@@ -66,6 +68,10 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     # False: the sticks do not walk or turn the robot (kNav* and the walking remote axes are recorded as 0), e.g.
     # for grasp-only data at the table. X/Y base height still works.
     walk: bool = True
+    # Parts held at the robot's pose (first observation, then again after every sim reset) instead of
+    # following the operator, e.g. `[left_arm]` for one fixed left-arm pose in every episode. Their keys stay
+    # in the action (the held targets) and in the observation. Any of LOCK_PARTS.
+    lock: tuple[str, ...] = ()
     # Both grips held this long while disengaged toggle the sim elastic band.
     band_toggle_hold_s: float = 1.0
     # Sim only: disengage and reset the sim at the end of every episode (the robot ignores the reset on
@@ -98,3 +104,11 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
         ):
             if value not in allowed:
                 raise ValueError(f"Unknown {name} {value!r}; expected one of {allowed}")
+        self.lock = tuple(self.lock)
+        unknown = [part for part in self.lock if part not in LOCK_PARTS]
+        if unknown:
+            raise ValueError(f"Unknown lock part(s) {unknown}; expected any of {LOCK_PARTS}")
+        if "head" in self.lock and self.head_mount != "pan_tilt":
+            raise ValueError(f"lock has 'head' but head_mount={self.head_mount!r} has no movable head")
+        if any(part.endswith("_hand") for part in self.lock) and self.end_effector not in HAND_SPECS:
+            raise ValueError(f"lock has a hand but end_effector={self.end_effector!r} has no hand")

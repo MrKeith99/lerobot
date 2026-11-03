@@ -800,3 +800,53 @@ def test_connect_passes_display_ego_scale_to_xr_input(monkeypatch):
     )
     teleop.connect()
     assert seen["ego_scale"] == 2.5 and seen["display_mode"] == "ego"
+
+
+def test_locked_left_arm_holds_the_reset_pose_and_stays_in_the_action(clock):
+    teleop = make_teleop(clock, lock=["left_arm"], max_arm_speed_rad_s=100.0, engage_arm_speed_rad_s=100.0)
+    teleop.send_feedback(observation(**{"kLeftElbow.q": 0.3}))
+    press(teleop, clock, "a")
+    teleop.arm_ik.solution[:] = 1.0
+    action = step(teleop, clock, XRFrame(tracking=True), n=5)
+    for name in ARM_23:
+        held = 0.3 if name == "left_elbow_joint" else 0.1
+        expected = held if name.startswith("left_") else 1.0
+        assert action[arm_key(name)] == pytest.approx(expected), name
+    assert not teleop._catching_up, "the locked arm's IK gap must not keep the slow catch-up speed"
+
+
+def test_locked_arm_takes_the_pose_after_a_sim_reset(clock):
+    teleop = make_teleop(clock, lock=["right_arm"])
+    teleop.send_feedback(observation())
+    teleop.on_episode_end()
+    step(teleop, clock)
+    teleop.send_feedback(observation(**{"kRightElbow.q": 0.5}))
+    press(teleop, clock, "a")
+    teleop.arm_ik.solution[:] = 1.0
+    # Engaging ends the resync window: later feedback no longer moves the held targets.
+    teleop.send_feedback(observation(**{"kRightElbow.q": 0.9}))
+    assert step(teleop, clock, XRFrame(tracking=True), n=20)["kRightElbow.q"] == pytest.approx(0.5)
+
+
+def test_locked_head_and_hand_ignore_the_operator(clock):
+    teleop = make_teleop(clock, lock=["head", "left_hand"], head_speed_rad_s=100.0, hand_blend_per_s=1000.0)
+    teleop.send_feedback(observation())
+    press(teleop, clock, "a")
+    hands = {"left": HandInput(trigger=1.0), "right": HandInput(trigger=1.0)}
+    action = step(teleop, clock, XRFrame(tracking=True, head_yaw=0.3, hands=hands))
+    assert action["kHeadYaw.q"] == 0.0 and action["kLeftHand.closure"] == 0.0
+    assert action["kRightHand.closure"] == 1.0
+    assert set(teleop.action_features) <= set(action)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"lock": ["left_leg"]},
+        {"lock": ["head"], "head_mount": "fixed"},
+        {"lock": ["right_hand"], "end_effector": "rubber_hand"},
+    ],
+)
+def test_bad_lock_is_rejected(overrides):
+    with pytest.raises(ValueError):
+        UnitreeG1XRTeleopConfig(**overrides)
