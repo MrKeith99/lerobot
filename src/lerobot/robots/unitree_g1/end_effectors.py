@@ -88,8 +88,9 @@ AMAZING_HAND_LIMIT_RAD = math.radians(90.0)
 AMAZING_HAND_OPEN_DEG: tuple[float, float] = (-35.0, 35.0)
 AMAZING_HAND_CLOSE_DEG: tuple[float, float] = (60.0, -60.0)
 AMAZING_HAND_THUMB_CLOSE_DEG: tuple[float, float] = (75.0, -75.0)
-AMAZING_HAND_THUMB_FINGER = 4  # verify on hardware
-# Lab per-servo zero trims (deg), applied at the tick layer by calibration only.
+AMAZING_HAND_THUMB_FINGER = 4  # verified on both hands (2026-11-03): right servos 7/8, left 17/18
+# Lab per-servo zero trims (deg), applied at the tick layer by calibration only. Checked on both hands
+# (2026-11-03): empty-hand hold load <= 105 per mille, hold error <= 5 ticks.
 AMAZING_HAND_MIDDLE_POS_DEG: dict[str, tuple[float, ...]] = {
     "right": (25, -20, 25, -15, 20, -25, 15, -15),
     "left": (20, -10, 33, -35, 30, -10, 20, -8),
