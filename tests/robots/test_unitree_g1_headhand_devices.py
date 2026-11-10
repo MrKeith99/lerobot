@@ -161,7 +161,7 @@ def test_read_ticks_uses_sync_read_on_head_and_read_on_hands(device, head_bus_mo
 def test_write_ticks_clamps_and_syncs_per_bus(device, head_bus_mock, hand_bus_mock):
     head_name = next(iter(HEAD_MOTORS))
     hand_name = next(iter(HAND_MOTORS))
-    goals = {head_name: 999999, hand_name: -999999}
+    goals = {head_name: 9_999_999, hand_name: -999999}
 
     device.write_ticks(goals)
 
@@ -367,3 +367,90 @@ def test_hand_disconnect_with_torque_off_uses_the_safe_path(hand_bus_mock):
     dev.disconnect(disable_torque=True)
     assert hand_bus_mock.disable_torque.call_count == len(HAND_MOTORS)
     hand_bus_mock.disconnect.assert_called_once_with(disable_torque=False)
+
+
+# Head in mode 5 (multi-turn, Goal_Current cap) with a software box in mode-5 ticks (lab G1, 2026-11-10: yaw
+# 1734..2831, pitch -523..648 with 0 = facing front). The turn count restarts in 0..4095 at power-up.
+LAB_BOX = {"kHeadYaw": (1734, 2831), "kHeadPitch": (-523, 648)}
+
+
+def _configured_head(present: dict[str, int]):
+    bus = _bus_factory({})
+    bus.sync_read.side_effect = lambda *a, **kw: dict(present)
+    dev = d.HeadHandDevice("/dev/head", None, head_bus_cls=lambda **kw: bus, head_box=LAB_BOX)
+    dev.connect()
+    dev.configure()
+    return dev, bus
+
+
+def test_configure_sets_mode_5_and_goal_current_never_the_current_limit():
+    dev, bus = _configured_head({"kHeadYaw": 2282, "kHeadPitch": 600})
+    writes = {(c.args[0], c.args[1], c.args[2]) for c in bus.write.call_args_list}
+    for name in HEAD_MOTORS:
+        assert ("Operating_Mode", name, 5) in writes
+        assert ("Goal_Current", name, d.HEAD_GOAL_CURRENT) in writes
+    assert not any(c.args[0] == "Current_Limit" for c in bus.write.call_args_list)
+    assert dev.head_limits == LAB_BOX
+    # torque stays off after configure (only set_torque powers the head), and no EEPROM setup on the shared head
+    bus.disable_torque.assert_called_once_with()
+    bus.enable_torque.assert_not_called()
+    bus.configure_motors.assert_not_called()
+
+
+def test_head_inside_box_holds_its_position_then_gets_torque():
+    dev, bus = _configured_head({"kHeadYaw": 2282, "kHeadPitch": 600})
+    dev.set_torque(True)
+    bus.sync_write.assert_called_once_with(
+        "Goal_Position", {"kHeadYaw": 2282, "kHeadPitch": 600}, normalize=False
+    )
+    assert set(bus.enable_torque.call_args.args[0]) == {"kHeadYaw", "kHeadPitch"}
+    assert dev.fault is None
+
+
+def test_pitch_resting_on_its_down_stop_gets_torque_and_is_clamped_into_the_box():
+    dev, bus = _configured_head({"kHeadYaw": 2282, "kHeadPitch": 720})  # 72 past the box: within tolerance
+    dev.set_torque(True)
+    assert set(bus.enable_torque.call_args.args[0]) == {"kHeadYaw", "kHeadPitch"}
+    bus.sync_write.reset_mock()
+    dev.write_ticks({"kHeadPitch": 900})
+    bus.sync_write.assert_called_once_with("Goal_Position", {"kHeadPitch": 648}, normalize=False)
+
+
+def test_pitch_looking_up_at_power_up_is_unwrapped_by_one_turn():
+    dev, bus = _configured_head({"kHeadYaw": 2282, "kHeadPitch": 3800})  # = -296 (looking up)
+    assert dev.read_ticks()["kHeadPitch"] == -296
+    dev.set_torque(True)
+    bus.sync_write.assert_called_once_with(
+        "Goal_Position", {"kHeadYaw": 2282, "kHeadPitch": 3800}, normalize=False
+    )
+    bus.sync_write.reset_mock()
+    dev.write_ticks({"kHeadPitch": -400, "kHeadYaw": 9999})
+    bus.sync_write.assert_called_once_with(
+        "Goal_Position", {"kHeadPitch": -400 + 4096, "kHeadYaw": 2831}, normalize=False
+    )
+
+
+def test_head_far_outside_its_box_keeps_torque_off_and_ignores_goals(caplog):
+    present = {"kHeadYaw": 1200, "kHeadPitch": 600}  # yaw 534 ticks right of the box
+    dev, bus = _configured_head(present)
+    with caplog.at_level(logging.ERROR):
+        dev.set_torque(True)
+    bus.enable_torque.assert_called_once_with(["kHeadPitch"])
+    assert "kHeadYaw reads 1200" in dev.fault
+    assert "kHeadYaw reads 1200" in caplog.text
+
+    bus.sync_write.reset_mock()
+    dev.write_ticks({"kHeadYaw": 2000, "kHeadPitch": 100})
+    bus.sync_write.assert_called_once_with("Goal_Position", {"kHeadPitch": 100}, normalize=False)
+
+    present["kHeadYaw"] = 2000  # turned back by hand
+    bus.enable_torque.reset_mock()
+    dev.set_torque(True)
+    assert set(bus.enable_torque.call_args.args[0]) == {"kHeadYaw", "kHeadPitch"}
+    assert dev.fault is None
+
+
+def test_head_without_configure_keeps_the_old_behaviour(device, head_bus_mock):
+    device.set_torque(True)
+    head_bus_mock.enable_torque.assert_called_once_with()
+    assert device.fault is None

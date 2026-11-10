@@ -45,9 +45,22 @@ TICKS_PER_RAD: dict[str, float] = {
     "scs0009": 1024 / math.radians(300.0),  # verify SCS0009 span on hardware
 }
 TICK_RANGE: dict[str, tuple[int, int]] = {
-    "xl330-m288": (0, 4095),
+    "xl330-m288": (
+        -1_048_575,
+        1_048_575,
+    ),  # the head runs in mode 5 (current-based position), which is multi-turn
     "scs0009": (0, 1023),
 }
+TICKS_PER_TURN = 4096
+
+# Mode 5 (the erasers' setting): multi-turn, EEPROM position limits not applied; Goal_Current (RAM, 1 mA/unit) caps
+# the push so a stop is only pressed gently. Current_Limit is never written.
+HEAD_OPERATING_MODE = 5
+HEAD_GOAL_CURRENT = 75  # starts both joints from standstill (40 did not); 2026-11-10 sweeps
+# Hard stops minus 30 ticks, measured 2026-11-10 (yaw 1704..2861; pitch -553..678 worst case over yaw, 0 = front).
+HEAD_BOX_TICKS: dict[str, tuple[int, int]] = {"kHeadYaw": (1734, 2831), "kHeadPitch": (-523, 648)}
+# Within this many ticks outside the box (pitch rests on its down stop at ~700) a joint still gets torque.
+HEAD_BOX_TOLERANCE = 150
 
 DEFAULT_HEAD_PORT = "/dev/ttyCH341USB0"
 DEFAULT_HAND_PORT = "/dev/ttyACM0"
@@ -126,6 +139,8 @@ class HeadHandDevice:
         hand_bus_cls=None,
         hand_force: HandForceLimiter | None = None,
         temp_every: int = 25,
+        head_box: Mapping[str, tuple[int, int]] | None = None,
+        head_goal_current: int = HEAD_GOAL_CURRENT,
     ) -> None:
         if head_port is None and hand_port is None:
             raise ValueError("HeadHandDevice needs a head port, a hand port or both")
@@ -158,6 +173,12 @@ class HeadHandDevice:
         self._hand_temp: dict[str, int] = {}
         self._hand_torque_off: set[str] = set()
         self._torque_on = False
+        self._head_box = dict(HEAD_BOX_TICKS if head_box is None else head_box)
+        self.head_goal_current = head_goal_current
+        self.head_limits: dict[str, tuple[int, int]] = {}
+        self.head_faults: dict[str, str] = {}
+        # The turn count restarts in 0..4095 at power-up (pitch looking up reads 3096..4095, not -1000..-1).
+        self.head_turns: dict[str, int] = {}
 
     @property
     def _buses(self) -> list:
@@ -180,17 +201,64 @@ class HeadHandDevice:
     def configure(self) -> None:
         with self._lock:
             if self.head_bus is not None:
-                with self.head_bus.torque_disabled():
-                    for name in HEAD_MOTORS:
-                        self.head_bus.write("Operating_Mode", name, 3, normalize=False)
-            for bus in self._buses:
-                bus.configure_motors()
+                # Torque stays off (`torque_disabled()` would re-enable it at a stale goal); no EEPROM writes on
+                # the shared head, so no configure_motors() for it.
+                self.head_bus.disable_torque()
+                for name in HEAD_MOTORS:
+                    self.head_bus.write("Operating_Mode", name, HEAD_OPERATING_MODE, normalize=False)
+                    self.head_bus.write("Goal_Current", name, self.head_goal_current, normalize=False)
+                self.head_limits = {name: box for name, box in self._head_box.items() if name in HEAD_MOTORS}
+                self.head_turns = dict.fromkeys(self.head_limits, 0)
+            if self.hand_bus is not None:
+                self.hand_bus.configure_motors()
+
+    def _unwrap_head(self, name: str, raw: int) -> int:
+        """Raw head tick -> box ticks: the whole-turn shift (the last one first) that lands within tolerance."""
+        if name not in self.head_limits:
+            return raw
+        low, high = self.head_limits[name]
+        for shift in (self.head_turns[name], 0, -TICKS_PER_TURN, TICKS_PER_TURN):
+            if low - HEAD_BOX_TOLERANCE <= raw + shift <= high + HEAD_BOX_TOLERANCE:
+                self.head_turns[name] = shift
+                return raw + shift
+        return raw + self.head_turns[name]
+
+    def _check_head_range(self) -> dict[str, int]:
+        """Raw present ticks of the head motors within tolerance of their box; the others go to `head_faults`."""
+        present = self.head_bus.sync_read("Present_Position", normalize=False)
+        allowed: dict[str, int] = {}
+        for name, (low, high) in self.head_limits.items():
+            raw = int(present[name])
+            tick = self._unwrap_head(name, raw)
+            if low - HEAD_BOX_TOLERANCE <= tick <= high + HEAD_BOX_TOLERANCE:
+                allowed[name] = raw
+                self.head_faults.pop(name, None)
+                continue
+            message = (
+                f"{name} reads {raw}, more than {HEAD_BOX_TOLERANCE} ticks outside its box {low}..{high}: torque "
+                "stays off. Turn it back by hand; it is checked again at the next torque-on."
+            )
+            if self.head_faults.get(name) is None:
+                logger.error(message)
+            self.head_faults[name] = message
+        return allowed
+
+    @property
+    def fault(self) -> str | None:
+        """Why some head motors are held without torque, or None."""
+        return "; ".join(self.head_faults.values()) or None
 
     def set_torque(self, enabled: bool) -> None:
         with self._lock:
             self._torque_on = enabled
             for bus in self._buses:
-                if enabled and bus is self.hand_bus and self._hand_torque_off:
+                if enabled and bus is self.head_bus and self.head_limits:
+                    allowed = self._check_head_range()
+                    if allowed:
+                        # hold where it is: a stale goal from before the torque-off would jump
+                        bus.sync_write("Goal_Position", allowed, normalize=False)
+                        bus.enable_torque(list(allowed))
+                elif enabled and bus is self.hand_bus and self._hand_torque_off:
                     allowed = [name for name in HAND_MOTORS if name not in self._hand_torque_off]
                     if allowed:
                         bus.enable_torque(allowed)
@@ -220,7 +288,7 @@ class HeadHandDevice:
             ticks: dict[str, int] = {}
             if self.head_bus is not None:
                 positions = self.head_bus.sync_read("Present_Position", normalize=False)
-                ticks.update((name, int(value)) for name, value in positions.items())
+                ticks.update((name, self._unwrap_head(name, int(value))) for name, value in positions.items())
             if self.hand_bus is not None:
                 if self.hand_force is None:
                     for name in HAND_MOTORS:
@@ -267,6 +335,11 @@ class HeadHandDevice:
             tick_min, tick_max = TICK_RANGE[self.models[name]]
             clamped = min(tick_max, max(tick_min, int(tick)))
             if name in HEAD_MOTORS:
+                if name in self.head_faults:
+                    continue  # torque off until it is turned back by hand
+                if name in self.head_limits:
+                    low, high = self.head_limits[name]
+                    clamped = min(high, max(low, clamped)) - self.head_turns[name]  # box ticks -> raw
                 head_goals[name] = clamped
             else:
                 hand_goals[name] = clamped

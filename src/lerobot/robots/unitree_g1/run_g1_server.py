@@ -63,7 +63,12 @@ from lerobot.robots.unitree_g1.handover import (
     make_strategy,
     relay_state,
 )
-from lerobot.robots.unitree_g1.headhand_devices import DEFAULT_HAND_PORT, DEFAULT_HEAD_PORT, HeadHandDevice
+from lerobot.robots.unitree_g1.headhand_devices import (
+    DEFAULT_HAND_PORT,
+    DEFAULT_HEAD_PORT,
+    HEAD_GOAL_CURRENT,
+    HeadHandDevice,
+)
 from lerobot.robots.unitree_g1.headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT, HeadHandServer
 from lerobot.robots.unitree_g1.safety import LOWCMD_TIMEOUT_S, LowCmdWatchdog, damping_motor_cmds
 from lerobot.robots.unitree_g1.unitree_sdk2_socket import (
@@ -360,6 +365,12 @@ def main() -> None:
     parser.add_argument("--no-head", action="store_true", help="Head/hand bridge without the head bus")
     parser.add_argument("--no-hands", action="store_true", help="Head/hand bridge without the hand bus")
     parser.add_argument("--head-port", default=DEFAULT_HEAD_PORT)
+    parser.add_argument(
+        "--head-goal-current",
+        type=int,
+        default=HEAD_GOAL_CURRENT,
+        help="Head Goal_Current in Dynamixel units (XC330: 1 mA), the cap on how hard the head pushes (mode 5)",
+    )
     parser.add_argument("--hand-port", default=DEFAULT_HAND_PORT)
     parser.add_argument("--headhand-rate", type=float, default=50.0)
     parser.add_argument("--headhand-state-port", type=int, default=HEADHAND_STATE_PORT)
@@ -477,6 +488,7 @@ def main() -> None:
             None if args.no_head else args.head_port,
             None if args.no_hands else args.hand_port,
             hand_force=hand_force_from_args(args),
+            head_goal_current=args.head_goal_current,
         )
         device.connect(handshake=not args.no_handshake)
         device.configure()

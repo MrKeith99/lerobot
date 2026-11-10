@@ -196,3 +196,28 @@ def test_headhand_server_warns_when_a_cycle_overruns(caplog):
     shutdown.set()
     t.join(timeout=2.0)
     server.stop()
+
+
+def test_headhand_server_reports_a_head_fault_in_the_state():
+    head_bus = MagicMock(name="HeadBus")
+    head_bus.is_connected = True
+    head_bus.sync_read.return_value = {"kHeadYaw": 300, "kHeadPitch": 600}
+    device = HeadHandDevice("/dev/head", None, head_bus_cls=lambda **kw: head_bus)
+    device.head_limits = {"kHeadYaw": (1734, 2831), "kHeadPitch": (-523, 648)}
+    device.head_turns = dict.fromkeys(device.head_limits, 0)
+
+    server = gz.HeadHandServer(device, state_port=0, cmd_port=0, rate_hz=100.0)
+    state_port, cmd_port = server.bind()
+    shutdown = threading.Event()
+    t = threading.Thread(target=server.run, args=(shutdown,), daemon=True)
+    t.start()
+    client = gz.HeadHandZmqClient("127.0.0.1", state_port=state_port, cmd_port=cmd_port)
+    client.connect()
+    try:
+        assert _wait_until(lambda: "kHeadYaw reads 300" in ((client.read_latest() or {}).get("error") or ""))
+        head_bus.enable_torque.assert_called_with(["kHeadPitch"])
+    finally:
+        shutdown.set()
+        t.join(timeout=2.0)
+        client.disconnect()
+        server.stop()
