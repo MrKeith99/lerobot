@@ -26,6 +26,7 @@ from ..config import TeleoperatorConfig
 
 INPUT_MODES = ("controller", "hand")
 DISPLAY_MODES = ("pass-through", "ego", "immersive")
+ARM_MAPPINGS = ("absolute", "relative")
 # Parts `lock` can hold still.
 LOCK_PARTS = ("head", "left_arm", "right_arm", "left_hand", "right_hand")
 
@@ -58,6 +59,9 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
     key_file: str | None = None
     # Local sim checkout for the arm kinematics; default: the sim's Hub snapshot (MJCF only).
     sim_root: str | None = None
+    # "absolute": the arms go to the operator's hand poses after A. "relative": A pairs the operator's hands with
+    # the robot's current hand poses and only the motion from there is applied, so nothing moves at A (clutch).
+    arm_mapping: str = "absolute"
     max_arm_speed_rad_s: float = 3.0
     # Arm speed after engaging, until the arms reach the operator's pose.
     engage_arm_speed_rad_s: float = 0.5
@@ -101,6 +105,7 @@ class UnitreeG1XRTeleopConfig(TeleoperatorConfig):
             ("head_sensor", self.head_sensor, HEAD_SENSORS),
             ("input_mode", self.input_mode, INPUT_MODES),
             ("display_mode", self.display_mode, DISPLAY_MODES),
+            ("arm_mapping", self.arm_mapping, ARM_MAPPINGS),
         ):
             if value not in allowed:
                 raise ValueError(f"Unknown {name} {value!r}; expected one of {allowed}")

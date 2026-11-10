@@ -77,7 +77,13 @@ class FakeIK:
         self.reset_q = None if q is None else list(q)
 
     def solve(self, left, right, q_current=None):
+        self.targets = (np.array(left), np.array(right))
         return SimpleNamespace(q=self.solution.copy())
+
+    def forward(self, q):
+        pose = np.eye(4)
+        pose[:3, 3] = [0.3, 0.2, 0.1]
+        return {"left": pose.copy(), "right": pose.copy()}
 
 
 @pytest.fixture
@@ -873,3 +879,41 @@ def test_locked_head_and_hand_ignore_the_operator(clock):
 def test_bad_lock_is_rejected(overrides):
     with pytest.raises(ValueError):
         UnitreeG1XRTeleopConfig(**overrides)
+
+
+def _pose(x=0.0, y=0.0, z=0.0, yaw=0.0):
+    pose = np.eye(4)
+    c, s = np.cos(yaw), np.sin(yaw)
+    pose[:3, :3] = [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
+    pose[:3, 3] = [x, y, z]
+    return pose
+
+
+def test_relative_mapping_starts_at_the_robot_pose_and_adds_the_operator_motion(clock):
+    teleop = make_teleop(clock, arm_mapping="relative")
+    teleop.send_feedback(observation())
+    start = {"left": _pose(0.5, 0.4, 0.3), "right": _pose(0.5, -0.4, 0.3)}
+    teleop.xr.frame = XRFrame(tracking=True, wrists=start, buttons={"a": True})
+    step(teleop, clock)
+    left, _ = teleop.arm_ik.targets
+    np.testing.assert_allclose(left, teleop.arm_ik.forward(None)["left"], atol=1e-12)  # nothing moves at A
+    moved = {"left": _pose(0.6, 0.4, 0.3, yaw=0.2), "right": start["right"]}
+    step(teleop, clock, XRFrame(tracking=True, wrists=moved))
+    left, right = teleop.arm_ik.targets
+    np.testing.assert_allclose(left[:3, 3], [0.4, 0.2, 0.1], atol=1e-12)  # robot start + 10 cm forward
+    np.testing.assert_allclose(left[:3, :3], _pose(yaw=0.2)[:3, :3], atol=1e-12)
+    np.testing.assert_allclose(right, teleop.arm_ik.forward(None)["right"], atol=1e-12)
+
+
+def test_absolute_mapping_sends_the_operator_pose(clock):
+    teleop = make_teleop(clock)
+    teleop.send_feedback(observation())
+    wrists = {"left": _pose(0.5, 0.4, 0.3), "right": _pose(0.5, -0.4, 0.3)}
+    teleop.xr.frame = XRFrame(tracking=True, wrists=wrists, buttons={"a": True})
+    step(teleop, clock)
+    np.testing.assert_allclose(teleop.arm_ik.targets[0], wrists["left"])
+
+
+def test_arm_mapping_is_validated():
+    with pytest.raises(ValueError, match="arm_mapping"):
+        UnitreeG1XRTeleopConfig(arm_mapping="mirror")

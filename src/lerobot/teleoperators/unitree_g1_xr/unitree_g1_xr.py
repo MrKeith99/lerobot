@@ -42,6 +42,8 @@ import time
 from functools import cached_property
 from typing import Any
 
+import numpy as np
+
 from lerobot.lerobot_types import RobotAction
 from lerobot.robots.unitree_g1.end_effectors import (
     HAND_CLOSURE_KEYS,
@@ -127,6 +129,7 @@ class UnitreeG1XRTeleop(Teleoperator):
         self._engaged = False
         self._catching_up = False
         self._auto_engaged = False
+        self._clutch: dict[str, tuple[np.ndarray, np.ndarray]] | None = None
         self._robot_type_checked = False
         # Only a robot that reports itself simulated gets the end-of-episode sim reset and resync.
         self._robot_is_sim = False
@@ -430,13 +433,36 @@ class UnitreeG1XRTeleop(Teleoperator):
             self._measured.get(arm_key(name), self._target[arm_key(name)]) for name in self.arm_ik.joint_names
         ]
         self.arm_ik.reset(q)
+        self._clutch = None
+        if self.config.arm_mapping == "relative":
+            # The operator's hands now (after the recenter) are paired with the robot's measured tool poses.
+            operator = self.xr.read().wrists
+            robot = self.arm_ik.forward(np.asarray(q, dtype=float))
+            self._clutch = {
+                side: (np.array(operator[side], dtype=float), robot[side]) for side in ("left", "right")
+            }
         self._engaged = True
         self._catching_up = True
         self._resync_s = 0.0
         logger.info("XR teleop engaged")
 
+    def _arm_targets(self, frame: Any) -> tuple[np.ndarray, np.ndarray]:
+        """IK tool targets: the operator's hand poses, or with the relative mapping the robot's poses at A moved
+        by the operator's motion since A (translation added, rotation applied in the pelvis frame)."""
+        if self._clutch is None:
+            return frame.wrists["left"], frame.wrists["right"]
+        targets = []
+        for side in ("left", "right"):
+            operator0, robot0 = self._clutch[side]
+            now = np.asarray(frame.wrists[side], dtype=float)
+            target = np.eye(4)
+            target[:3, :3] = now[:3, :3] @ operator0[:3, :3].T @ robot0[:3, :3]
+            target[:3, 3] = robot0[:3, 3] + now[:3, 3] - operator0[:3, 3]
+            targets.append(target)
+        return targets[0], targets[1]
+
     def _step_arms(self, frame: Any, dt: float) -> None:
-        solution = self.arm_ik.solve(frame.wrists["left"], frame.wrists["right"])
+        solution = self.arm_ik.solve(*self._arm_targets(frame))
         # Right after engaging the operator's pose may be far from the robot's: approach it slowly.
         speed = self.config.engage_arm_speed_rad_s if self._catching_up else self.config.max_arm_speed_rad_s
         max_step = speed * dt
