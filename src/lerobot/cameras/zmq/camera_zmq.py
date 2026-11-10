@@ -183,26 +183,21 @@ class ZMQCamera(Camera):
         if not self.is_connected or self.socket is None:
             raise DeviceNotConnectedError(f"{self} is not connected.")
 
-        try:
-            message = self.socket.recv_string()
-        except zmq.Again as e:
-            raise TimeoutError(f"{self} timeout after {self.timeout_ms}ms") from e
+        # The image server publishes at a fixed rate and leaves out frames it already sent: skip those.
+        images: dict[str, str] = {}
+        while not images:
+            try:
+                message = self.socket.recv_string()
+            except zmq.Again as e:
+                raise TimeoutError(f"{self} timeout after {self.timeout_ms}ms") from e
 
-        # Decode JSON message
-        data = json.loads(message)
-
-        if "images" not in data:
-            raise RuntimeError(f"{self} invalid message: missing 'images' key")
-
-        images = data["images"]
+            data = json.loads(message)
+            if "images" not in data:
+                raise RuntimeError(f"{self} invalid message: missing 'images' key")
+            images = data["images"]
 
         # Get image by camera name or first available
-        if self.camera_name in images:
-            img_b64 = images[self.camera_name]
-        elif images:
-            img_b64 = next(iter(images.values()))
-        else:
-            raise RuntimeError(f"{self} no images in message")
+        img_b64 = images.get(self.camera_name) or next(iter(images.values()))
 
         # Decode base64 JPEG
         img_bytes = base64.b64decode(img_b64)

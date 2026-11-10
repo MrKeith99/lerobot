@@ -190,6 +190,7 @@ def teleop_loop(
 
     display_len = max(len(key) for key in robot.action_features)
     start = time.perf_counter()
+    last_print_t = float("-inf")
     while True:
         loop_start = time.perf_counter()
 
@@ -241,7 +242,9 @@ def teleop_loop(
         dt_s = time.perf_counter() - loop_start
         precise_sleep(max(1 / fps - dt_s, 0.0))
         loop_s = time.perf_counter() - loop_start
-        print(f"Teleop loop time: {loop_s * 1e3:.2f}ms ({1 / loop_s:.0f} Hz)")
+        if display_data or loop_start - last_print_t >= 1.0:  # once a second, unless the table is shown
+            last_print_t = loop_start
+            print(f"Teleop loop time: {loop_s * 1e3:.2f}ms ({1 / loop_s:.0f} Hz)")
         move_cursor_up(1)
 
         if duration is not None and time.perf_counter() - start >= duration:
