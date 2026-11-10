@@ -258,7 +258,7 @@ class HeadHandBridge:
         if all(name in self.motors for name in HEAD_MOTORS):
             input("Center the head (camera forward, level), then press Enter")
             zero_ticks = _ticks(self.client.read_latest())
-            input("Turn the head to the robot's LEFT and tilt UP slightly, then press Enter")
+            input("Turn the head to the robot's LEFT and tilt DOWN slightly, then press Enter")
             direction_ticks = _ticks(self.client.read_latest())
             print("Sweep pan and tilt to both mechanical stops, then press Enter")
             head_range = self._record_range()
