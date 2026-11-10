@@ -246,6 +246,9 @@ class HeadHandServer:
                     first_iteration = False
             except Exception as e:
                 error = str(e)
+            fault = getattr(self.device, "fault", None)
+            if error is None and isinstance(fault, str):
+                error = fault
 
             payload = encode_state(ticks, self._torque_on, error=error)
             with contextlib.suppress(zmq.Again):

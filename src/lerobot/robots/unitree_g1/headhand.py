@@ -94,6 +94,7 @@ class HeadHandBridge:
         self._ticks: dict[str, int] = {}
         self._stale_logged = False
         self._warned_names: set[str] = set()
+        self._last_error: str | None = None
 
     def connect(self) -> None:
         """Connect and wait for the first state message."""
@@ -122,7 +123,13 @@ class HeadHandBridge:
 
     def read(self, calibration: Mapping[str, MotorCalibration]) -> dict[str, float]:
         """Latest positions (rad) of the calibrated motors, keyed `{name}.q`."""
-        self._ticks.update(_ticks(self.client.read_latest()))
+        latest = self.client.read_latest()
+        self._ticks.update(_ticks(latest))
+        error = latest.get("error") if latest else None
+        if error != self._last_error:
+            if error:
+                logger.error(f"Head/hand bridge on the robot: {error}")
+            self._last_error = error
 
         age_s = self.client.age_s
         if age_s is not None and age_s > self.stale_warn_s:

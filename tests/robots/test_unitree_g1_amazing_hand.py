@@ -18,6 +18,7 @@
 
 import contextlib
 import json
+import logging
 import math
 import time
 from unittest.mock import MagicMock, patch
@@ -714,6 +715,15 @@ class TestAmazingHandCalibration:
             round(-q * TICKS_PER_RAD["xl330-m288"]) + 2100 for q in HEAD_LIMITS_RAD["kHeadPitch"]
         )
         assert (calibration["kHeadPitch"].range_min, calibration["kHeadPitch"].range_max) == (low, high)
+
+    def test_bridge_logs_a_relay_side_fault_once(self, caplog):
+        bridge = HeadHandBridge(HEAD_HAND_MOTORS, "127.0.0.1", 1, 2)
+        state = {"ticks": {"kHeadYaw": 300}, "error": "kHeadYaw reads 300, outside its position limits"}
+        bridge.client = MagicMock(read_latest=MagicMock(return_value=state), age_s=0.0)
+        with caplog.at_level(logging.ERROR):
+            bridge.read(bridge.default_calibration())
+            bridge.read(bridge.default_calibration())
+        assert caplog.text.count("kHeadYaw reads 300") == 1
 
     @pytest.mark.parametrize("hand_mode, interactive", [("", False), ("i", True)])
     def test_bridge_calibrate_runs_head_then_hands(self, hand_mode, interactive):
