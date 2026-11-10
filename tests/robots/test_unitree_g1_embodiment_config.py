@@ -34,6 +34,7 @@ from lerobot.robots.unitree_g1.g1_utils import (
 )
 from lerobot.robots.unitree_g1.headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT
 from lerobot.robots.unitree_g1.heads import DEFAULT_HEAD_Q, HEAD_KEYS
+from lerobot.robots.unitree_g1.safety import DAMPING_KD
 from lerobot.teleoperators.unitree_g1_gamepad.unitree_g1_gamepad import TELEOP_ACTION_KEYS
 from lerobot.utils.feature_utils import build_dataset_frame, hw_to_dataset_features
 
@@ -220,11 +221,11 @@ class TestEmbodimentGains:
         assert all(cfg.kp[i] > 0 for i in valid_slots)
         assert all(cfg.kd[i] > 0 for i in valid_slots)
 
-    def test_freeze_legs_zeroes_leg_slots_only(self):
+    def test_freeze_legs_damps_leg_slots_only(self):
         cfg = _ah_config(freeze_legs=True, controller=None)
         for i in G1_LEG_SLOTS:
             assert cfg.kp[i] == 0.0
-            assert cfg.kd[i] == 0.0
+            assert cfg.kd[i] == DAMPING_KD[i] > 0.0
         non_leg_valid = [i for i in range(29) if i not in G1_LEG_SLOTS and i not in G1_23_INVALID_SDK_SLOTS]
         assert all(cfg.kp[i] > 0 for i in non_leg_valid)
 

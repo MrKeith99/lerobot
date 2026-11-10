@@ -23,7 +23,7 @@ from .end_effectors import AMAZING_HAND_MOTORS, END_EFFECTORS, HAND_REPRESENTATI
 from .g1_utils import BODIES, G1_LEG_SLOTS, REVISIONS, invalid_sdk_slots
 from .headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT
 from .heads import DEFAULT_HEAD_Q, HEAD_MOTORS, HEAD_MOUNTS, HEAD_SENSORS
-from .safety import LOWSTATE_TIMEOUT_S
+from .safety import DAMPING_KD, LOWSTATE_TIMEOUT_S
 
 _GAINS: dict[str, dict[str, list[float]]] = {
     "left_leg": {
@@ -165,7 +165,7 @@ class UnitreeG1Config(RobotConfig):
     # (+-metres on x and y, +-degrees on yaw). (0, 0) = a fixed start.
     sim_start_randomize: tuple[float, float] = (0.0, 0.0)
 
-    # Without a controller: zero the leg gains so the legs hang passive (e.g. on a gantry).
+    # Without a controller: legs in damping (kp 0, damping kd) instead of holding a pose (e.g. on a gantry).
     freeze_legs: bool = False
 
     # Head/hand ZMQ bridge (d455_pan_tilt head, amazing_hand). Defaults to `robot_ip` on hardware, or
@@ -241,9 +241,10 @@ class UnitreeG1Config(RobotConfig):
             self.kp[i] = 0.0
             self.kd[i] = 0.0
         if self.freeze_legs and self.controller is None:
+            # Legs in damping (kp 0, the damping kd), never zero torque.
             for i in G1_LEG_SLOTS:
                 self.kp[i] = 0.0
-                self.kd[i] = 0.0
+                self.kd[i] = DAMPING_KD[i]
 
     @property
     def robot_type(self) -> str:
