@@ -491,7 +491,7 @@ class TestAmazingHandConnect:
 
         assert found is not None
         calib = robot.calibration["kHeadYaw"]
-        expected = rad_to_ticks("xl330-m288", 0.7, calib)
+        expected = rad_to_ticks("xl330-m288", HEAD_LIMITS_RAD["kHeadYaw"][1], calib)
         assert found == expected
 
     def test_mode_machine_mismatch_raises(self, headhand_server, tmp_path):

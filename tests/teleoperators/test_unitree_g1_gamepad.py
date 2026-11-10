@@ -29,7 +29,7 @@ from lerobot.robots.unitree_g1.end_effectors import (
     amazing_hand_motor_names,
 )
 from lerobot.robots.unitree_g1.g1_utils import BODY_KEYS, REMOTE_AXES, REMOTE_BUTTONS, REMOTE_KEYS
-from lerobot.robots.unitree_g1.heads import HEAD_KEYS
+from lerobot.robots.unitree_g1.heads import HEAD_KEYS, HEAD_LIMITS_RAD
 from lerobot.teleoperators.unitree_g1_gamepad import (
     UnitreeG1GamepadTeleop,
     UnitreeG1GamepadTeleopConfig,
@@ -161,7 +161,7 @@ def test_hat_up_tilts_and_saturates(teleop):
                 first_tilt = action["kHeadPitch.q"]
         assert first_tilt is not None
         assert first_tilt > 0.0
-        assert action["kHeadPitch.q"] == pytest.approx(0.8, abs=1e-6)
+        assert action["kHeadPitch.q"] == pytest.approx(HEAD_LIMITS_RAD["kHeadPitch"][1], abs=1e-6)
 
 
 def test_hat_pan_saturates_both_directions(teleop):
@@ -173,14 +173,14 @@ def test_hat_pan_saturates_both_directions(teleop):
         for _ in range(200):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["kHeadYaw.q"] == pytest.approx(-0.7, abs=1e-6)
+        assert action["kHeadYaw.q"] == pytest.approx(HEAD_LIMITS_RAD["kHeadYaw"][0], abs=1e-6)
 
         teleop.gamepad.buttons.discard(layout.dpad_right)
         teleop.gamepad.buttons.add(layout.dpad_left)
         for _ in range(400):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["kHeadYaw.q"] == pytest.approx(0.7, abs=1e-6)
+        assert action["kHeadYaw.q"] == pytest.approx(HEAD_LIMITS_RAD["kHeadYaw"][1], abs=1e-6)
 
 
 def test_rb_closes_right_hand_only(teleop):
@@ -610,7 +610,7 @@ def test_dpad_buttons_tilt_same_as_hat(teleop):
         for _ in range(200):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["kHeadPitch.q"] == pytest.approx(0.8, abs=1e-6)
+        assert action["kHeadPitch.q"] == pytest.approx(HEAD_LIMITS_RAD["kHeadPitch"][1], abs=1e-6)
 
 
 class _FakeJoystick:

@@ -33,7 +33,7 @@ from lerobot.robots.unitree_g1.g1_utils import (  # noqa: E402
     ROBOT_TYPE_FEEDBACK_KEY,
     SIM_RESET_KEY,
 )
-from lerobot.robots.unitree_g1.heads import HEAD_KEYS  # noqa: E402
+from lerobot.robots.unitree_g1.heads import HEAD_KEYS, HEAD_LIMITS_RAD  # noqa: E402
 from lerobot.teleoperators.unitree_g1_xr import (  # noqa: E402
     UnitreeG1XRTeleop,
     UnitreeG1XRTeleopConfig,
@@ -240,7 +240,9 @@ def test_head_follows_the_headset_within_its_limits(clock):
     action = step(teleop, clock, XRFrame(tracking=True, head_yaw=0.3, head_pitch=0.2))
     assert action["kHeadYaw.q"] == pytest.approx(0.3) and action["kHeadPitch.q"] == pytest.approx(0.2)
     action = step(teleop, clock, XRFrame(tracking=True, head_yaw=2.0, head_pitch=1.5))
-    assert action["kHeadYaw.q"] == pytest.approx(0.7) and action["kHeadPitch.q"] == pytest.approx(0.8)
+    assert action["kHeadYaw.q"] == pytest.approx(HEAD_LIMITS_RAD["kHeadYaw"][1]) and action[
+        "kHeadPitch.q"
+    ] == pytest.approx(HEAD_LIMITS_RAD["kHeadPitch"][1])
     slow = make_teleop(clock, head_speed_rad_s=1.0)
     slow.send_feedback(observation())
     press(slow, clock, "a")

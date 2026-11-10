@@ -31,8 +31,9 @@ HEAD_MOTORS: dict[str, tuple[int, str]] = {
     "kHeadPitch": (2, "xl330-m288"),
 }
 HEAD_KEYS: tuple[str, ...] = tuple(f"{name}.q" for name in HEAD_MOTORS)
+# The real head's software box (headhand_devices.HEAD_BOX_TICKS) in rad; the sim's pan_tilt.xml uses the same ranges.
 HEAD_LIMITS_RAD: dict[str, tuple[float, float]] = {
-    "kHeadYaw": (-0.7, 0.7),
-    "kHeadPitch": (-1.57, 0.8),
+    "kHeadYaw": (-0.84, 0.84),
+    "kHeadPitch": (-0.8, 0.99),
 }
 DEFAULT_HEAD_Q: tuple[float, float] = (0.0, 0.0)

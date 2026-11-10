@@ -25,6 +25,7 @@ import pytest
 
 from lerobot.robots.unitree_g1.end_effectors import AMAZING_HAND, amazing_hand_motor_names
 from lerobot.robots.unitree_g1.g1_utils import REMOTE_AXES, REMOTE_KEYS
+from lerobot.robots.unitree_g1.heads import HEAD_LIMITS_RAD
 from lerobot.teleoperators.unitree_g1_gamepad.unitree_g1_gamepad import TELEOP_ACTION_KEYS, default_targets
 from lerobot.teleoperators.unitree_g1_keyboard import (
     UnitreeG1KeyboardTeleop,
@@ -254,14 +255,14 @@ def test_arrow_keys_move_head_same_sign_as_gamepad(teleop):
         for _ in range(200):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["kHeadPitch.q"] == pytest.approx(0.8, abs=1e-6)
+        assert action["kHeadPitch.q"] == pytest.approx(HEAD_LIMITS_RAD["kHeadPitch"][1], abs=1e-6)
         teleop.gamepad.release("up")
 
         teleop.gamepad.press("left")
         for _ in range(400):
             clock["t"] += 0.05
             action = teleop.get_action()
-        assert action["kHeadYaw.q"] == pytest.approx(0.7, abs=1e-6)
+        assert action["kHeadYaw.q"] == pytest.approx(HEAD_LIMITS_RAD["kHeadYaw"][1], abs=1e-6)
 
 
 def test_e_held_closes_right_hand(teleop):
