@@ -677,6 +677,30 @@ class TestAmazingHandSimulationConnect:
                 robot.disconnect()
 
 
+class TestHeadTorqueAtConnect:
+    @pytest.mark.parametrize(
+        "is_sim, calibrated, calibrate, torque_on",
+        [
+            (False, True, True, True),
+            (False, True, False, True),
+            (True, True, True, False),
+            (False, False, False, False),
+        ],
+    )
+    def test_real_connect_with_a_calibration_turns_head_torque_on(
+        self, is_sim, calibrated, calibrate, torque_on
+    ):
+        from lerobot.robots.unitree_g1.unitree_g1 import UnitreeG1
+
+        robot = MagicMock(dex_hand=None, is_calibrated=calibrated)
+        robot.config.is_simulation = is_sim
+        UnitreeG1._connect_head_hand(robot, calibrate)
+        if torque_on:
+            robot.headhand.set_torque.assert_called_once_with(True)
+        else:
+            robot.headhand.set_torque.assert_not_called()
+
+
 class TestAmazingHandCalibration:
     def test_robot_calibrate_delegates_to_bridge_and_saves(self, ah_robot):
         robot, _ = ah_robot

@@ -424,13 +424,16 @@ python src/lerobot/robots/unitree_g1/run_g1_server.py \
   The server releases Unitree's built-in balance controller: there is no fall
   catching. Use a gantry unless you are testing a locomotion controller in a
   cleared area. Without a controller the legs hold their connect-time pose;
-  `--robot.freeze_legs=true` makes them limp instead. The body is never sent
-  zero torque: `disconnect()` puts it in damping (kp 0, kd > 0), and so does the
-  server when no command arrives for 0.3 s (`--lowcmd-timeout`) or the client
-  sees robot state older than 0.2 s (`--robot.lowstate_timeout_s`). After a
-  timeout, restart the client to resume. The AmazingHand servos keep torque: run
-  `python -m lerobot.robots.unitree_g1.headhand_devices torque-off` on the
-  Jetson (or power-cycle).
+  `--robot.freeze_legs=true` puts them in damping instead. The body is never
+  sent zero torque: `disconnect()` puts it in damping (kp 0, kd > 0), and so
+  does the server when no command arrives for 0.3 s (`--lowcmd-timeout`) or the
+  client sees robot state older than 0.2 s (`--robot.lowstate_timeout_s`). After
+  a timeout, restart the client to resume. The Unitree remote's own damping does
+  not act while the server runs; instead, holding L2+B on it latches damping in
+  the server (`--estop-keys`, `''` turns it off), and the client stops with an
+  error. The AmazingHand servos keep torque: run `python -m
+  lerobot.robots.unitree_g1.headhand_devices torque-off` on the Jetson (or
+  power-cycle).
 </Tip>
 
 <Tip warning={true}>

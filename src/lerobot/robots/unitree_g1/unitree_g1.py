@@ -267,6 +267,7 @@ class UnitreeG1(Robot):
         self._publish_stop = threading.Event()
         self._relay_handover: str | None = None
         self._relay_state: str | None = None
+        self._relay_forwarded = False  # the relay has forwarded this client's commands at least once
         self._hold_q: list[float] | None = None
 
     @property
@@ -646,8 +647,14 @@ class UnitreeG1(Robot):
         if self._fault is None:
             with self._lowstate_lock:
                 age = now - self._lowstate_t
+                state = self._relay_state
             if age > self.config.lowstate_timeout_s:
                 self._fault = f"robot state is {age:.2f}s old (limit {self.config.lowstate_timeout_s}s)"
+            elif state == "forwarding":
+                self._relay_forwarded = True
+            elif state == "damping" and self._relay_forwarded:
+                self._fault = "the relay put the robot in damping (remote e-stop or relay watchdog)"
+            if self._fault is not None:
                 logger.error(f"[UnitreeG1] {self._fault}: robot in DAMPING. Restart the client to resume.")
                 self._send_damping()
         return self._fault is not None
@@ -1021,6 +1028,9 @@ class UnitreeG1(Robot):
                 self._save_calibration()
             else:
                 self.calibrate()
+        elif not self.config.is_simulation and self.is_calibrated:
+            # The relay keeps the torque state of an earlier client (e.g. an aborted calibration turned it off).
+            self.headhand.set_torque(True)
 
     def _sim_camera_names(self) -> list[str]:
         """Cameras the sim should render: `sim_cameras`, else the ones this robot reads ([] = sim default)."""
@@ -1084,6 +1094,7 @@ class UnitreeG1(Robot):
         self._fault = None
         self._damping = False
         self._commanded = False
+        self._relay_forwarded = False
         self._publish_stop.clear()
 
         # Initialize lowcmd message
@@ -1134,6 +1145,9 @@ class UnitreeG1(Robot):
 
     def disconnect(self):
         if self.headhand is not None:
+            if not self.config.is_simulation:
+                with contextlib.suppress(Exception):
+                    self.headhand.set_torque(False)  # head/hands limp on exit, like the body's damping
             self.headhand.disconnect()
         if self.dex_hand is not None:
             self.dex_hand.disconnect()

@@ -176,6 +176,7 @@ class HeadHandServer:
         rate_hz: float = 50.0,
         context: zmq.Context | None = None,
         bind_address: str = "*",
+        release_event: Any = None,
     ) -> None:
         self.device = device
         self.state_port = state_port
@@ -187,6 +188,12 @@ class HeadHandServer:
         self._state_sock: zmq.Socket | None = None
         self._cmd_sock: zmq.Socket | None = None
         self._torque_on = False
+        # Any Event-like (a multiprocessing.Event when the server runs in its own process).
+        self._release = threading.Event() if release_event is None else release_event
+
+    def release(self) -> None:
+        """Torque off at the next cycle (any thread), e.g. when the relay damps the body; a client re-enables it."""
+        self._release.set()
 
     def bind(self) -> tuple[int, int]:
         if self._context is None:
@@ -244,6 +251,12 @@ class HeadHandServer:
                     self.device.set_torque(True)
                     self._torque_on = True
                     first_iteration = False
+                # After the start-up torque-on, so a release that came first still wins.
+                if self._release.is_set():
+                    self._release.clear()
+                    self.device.set_torque(False)
+                    self._torque_on = False
+                    logger.warning("Head/hand torque off: the relay damped the body")
             except Exception as e:
                 error = str(e)
             fault = getattr(self.device, "fault", None)

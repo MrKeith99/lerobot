@@ -32,6 +32,8 @@ import base64
 import contextlib
 import json
 import logging
+import multiprocessing
+import signal
 import threading
 import time
 from typing import Any
@@ -70,7 +72,14 @@ from lerobot.robots.unitree_g1.headhand_devices import (
     HeadHandDevice,
 )
 from lerobot.robots.unitree_g1.headhand_zmq import HEADHAND_CMD_PORT, HEADHAND_STATE_PORT, HeadHandServer
-from lerobot.robots.unitree_g1.safety import LOWCMD_TIMEOUT_S, LowCmdWatchdog, damping_motor_cmds
+from lerobot.robots.unitree_g1.safety import (
+    ESTOP_KEYS,
+    LOWCMD_TIMEOUT_S,
+    LowCmdWatchdog,
+    damping_motor_cmds,
+    remote_key_mask,
+    remote_keys,
+)
 from lerobot.robots.unitree_g1.unitree_sdk2_socket import (
     LOWCMD_PORT,
     LOWSTATE_PORT,
@@ -136,8 +145,10 @@ def state_forward_loop(
     shutdown_event: threading.Event,
     handover: Handover | None = None,
     watchdog: LowCmdWatchdog | None = None,
+    estop_mask: int = 0,
 ) -> None:
-    """Read observation from DDS and forward to ZMQ clients (with the relay's handover state)."""
+    """Read observation from DDS and forward to ZMQ clients (with the relay's handover state). Every lowstate
+    with all `estop_mask` remote keys held latches damping for the active client (remote e-stop)."""
     last_state_time = 0.0
 
     while not shutdown_event.is_set():
@@ -145,6 +156,15 @@ def state_forward_loop(
         msg = lowstate_sub.Read()
         if msg is None:
             continue
+
+        if (
+            estop_mask
+            and watchdog is not None
+            and remote_keys(msg.wireless_remote) & estop_mask == estop_mask
+        ):
+            session = watchdog.estop()
+            if session is not None:
+                print(f"remote e-stop: DAMPING session {session} (restart the client to resume)", flush=True)
 
         now = time.time()
         # optional downsampling (if robot dds rate > state_period)
@@ -327,6 +347,47 @@ def start_hand_bridge(family: str, ctx: zmq.Context) -> list[threading.Thread]:
     return threads
 
 
+def headhand_process(device_kwargs, handshake, server_kwargs, shutdown, release, ready) -> None:
+    """Head/hand bridge in its own process: in the relay's threads it waited on the GIL (lowstate JSON at 500 Hz,
+    camera encoding) and ran at ~25 Hz. `shutdown`, `release` and `ready` are multiprocessing Events."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)  # the relay stops this process through `shutdown`
+    logging.basicConfig(level=logging.WARNING)
+    device = HeadHandDevice(**device_kwargs)
+    server = None
+    try:
+        device.connect(handshake=handshake)
+        device.configure()
+        server = HeadHandServer(device, release_event=release, **server_kwargs)
+        server.bind()
+        ready.set()
+        server.run(shutdown)
+    finally:
+        if server is not None:
+            server.stop()
+        with contextlib.suppress(Exception):
+            device.disconnect()
+
+
+def start_headhand_process(device_kwargs, handshake, server_kwargs, timeout_s: float = 20.0):
+    """Start `headhand_process`; returns (process, shutdown, release) once it serves, or raises."""
+    mp = multiprocessing.get_context("spawn")  # never fork a process that runs DDS threads
+    shutdown, release, ready = mp.Event(), mp.Event(), mp.Event()
+    proc = mp.Process(
+        target=headhand_process,
+        args=(device_kwargs, handshake, server_kwargs, shutdown, release, ready),
+        name="headhand",
+        daemon=True,
+    )
+    proc.start()
+    deadline = time.monotonic() + timeout_s
+    while not ready.wait(0.1):
+        if not proc.is_alive() or time.monotonic() > deadline:
+            shutdown.set()
+            proc.join(timeout=2.0)
+            raise RuntimeError(f"head/hand process did not start (exit code {proc.exitcode})")
+    return proc, shutdown, release
+
+
 def build_camera_config(args: argparse.Namespace) -> dict:
     """Build the `ImageServer` camera config dict from CLI args."""
     if args.camera_type == "intelrealsense":
@@ -401,8 +462,14 @@ def main() -> None:
         default=LOWCMD_TIMEOUT_S,
         help="Damping once no lowcmd arrived for this many seconds (default: %(default)s)",
     )
+    parser.add_argument(
+        "--estop-keys",
+        default=ESTOP_KEYS,
+        help="Unitree remote keys that latch damping while held, e.g. L2+B; '' turns it off (default: %(default)s)",
+    )
     add_hand_force_args(parser)
     args = parser.parse_args()
+    estop_mask = remote_key_mask(args.estop_keys)
     if args.camera and args.camera_type == "intelrealsense" and not args.camera_serial:
         parser.error("--camera-serial is required with --camera-type intelrealsense")
     if args.headhand and args.no_head and args.no_hands:
@@ -472,35 +539,36 @@ def main() -> None:
     # start observation forwarding in background thread
     t_state = threading.Thread(
         target=state_forward_loop,
-        args=(lowstate_sub, lowstate_sock, state_period, shutdown_event, handover, watchdog),
+        args=(lowstate_sub, lowstate_sock, state_period, shutdown_event, handover, watchdog, estop_mask),
     )
+    print(f"remote e-stop: {args.estop_keys or 'off'}")
     t_state.start()
 
     if args.hands != "none":
         start_hand_bridge(args.hands, ctx)
         print(f"{args.hands} hand bridge started")
 
-    device = None
-    headhand_server = None
-    t_headhand = None
+    headhand = None
     if args.headhand:
-        device = HeadHandDevice(
-            None if args.no_head else args.head_port,
-            None if args.no_hands else args.hand_port,
-            hand_force=hand_force_from_args(args),
-            head_goal_current=args.head_goal_current,
+        headhand = start_headhand_process(
+            {
+                "head_port": None if args.no_head else args.head_port,
+                "hand_port": None if args.no_hands else args.hand_port,
+                "hand_force": hand_force_from_args(args),
+                "head_goal_current": args.head_goal_current,
+            },
+            not args.no_handshake,
+            {
+                "state_port": args.headhand_state_port,
+                "cmd_port": args.headhand_cmd_port,
+                "rate_hz": args.headhand_rate,
+            },
         )
-        device.connect(handshake=not args.no_handshake)
-        device.configure()
-        headhand_server = HeadHandServer(
-            device,
-            state_port=args.headhand_state_port,
-            cmd_port=args.headhand_cmd_port,
-            rate_hz=args.headhand_rate,
+        watchdog.on_trip = headhand[2].set  # watchdog timeout or remote e-stop: head/hands off too
+        print(
+            f"Head/hand bridge started in its own process "
+            f"(state={args.headhand_state_port}, cmd={args.headhand_cmd_port})"
         )
-        t_headhand = threading.Thread(target=headhand_server.run, args=(shutdown_event,), daemon=True)
-        t_headhand.start()
-        print(f"Head/hand bridge started (state={args.headhand_state_port}, cmd={args.headhand_cmd_port})")
 
     print("bridge running (lowstate -> zmq, lowcmd -> dds)")
 
@@ -531,13 +599,12 @@ def main() -> None:
         shutdown_event.set()
         ctx.term()  # terminates blocking zmq.recv() calls
         t_state.join(timeout=2.0)
-        if t_headhand is not None:
-            t_headhand.join(timeout=2.0)
-        if headhand_server is not None:
-            headhand_server.stop()
-        if device is not None:
-            with contextlib.suppress(Exception):
-                device.disconnect()
+        if headhand is not None:
+            proc, headhand_shutdown, _ = headhand
+            headhand_shutdown.set()
+            proc.join(timeout=3.0)
+            if proc.is_alive():
+                proc.terminate()
         if camera_thread is not None:
             camera_thread.join(timeout=2.0)
 

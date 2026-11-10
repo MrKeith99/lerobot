@@ -23,7 +23,13 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from lerobot.robots.unitree_g1.safety import DAMPING_KD, LowCmdWatchdog, damping_motor_cmds
+from lerobot.robots.unitree_g1.safety import (
+    DAMPING_KD,
+    LowCmdWatchdog,
+    damping_motor_cmds,
+    remote_key_mask,
+    remote_keys,
+)
 from lerobot.utils.import_utils import _unitree_sdk_available
 
 
@@ -68,6 +74,41 @@ def test_watchdog_ignores_a_second_session_while_one_is_active():
     wd.on_command("a", 1.0)
     assert wd.on_command("b", 1.1) is False
     assert wd.session == "a"
+
+
+def test_remote_key_mask_and_keys_match_the_robot():
+    assert remote_key_mask("L2+B") == 0x0220
+    assert remote_key_mask("") == 0
+    with pytest.raises(ValueError, match="unknown remote key"):
+        remote_key_mask("L3")
+    pressed = bytes([0x55, 0x51, 0x20, 0x02]) + bytes(36)  # L2+B as read on the robot 2026-11-10
+    assert remote_keys(pressed) == 0x0220
+    assert remote_keys(b"") == 0
+
+
+def test_watchdog_estop_latches_the_active_session():
+    wd = LowCmdWatchdog(timeout_s=0.3)
+    assert wd.estop() is None  # no client: already damping
+    wd.on_command("a", 1.0)
+    assert wd.estop() == "a"
+    assert wd.check(1.05) is True
+    assert wd.on_command("a", 1.1) is False
+    assert wd.on_command("b", 1.2) is True
+
+
+def test_watchdog_on_trip_runs_once_per_timeout_or_estop():
+    wd = LowCmdWatchdog(timeout_s=0.3)
+    trips = []
+    wd.on_trip = lambda: trips.append(1)
+    wd.check(0.0)  # damping before a client: not a trip
+    wd.on_command("a", 1.0)
+    wd.check(1.31)
+    wd.check(1.5)
+    assert len(trips) == 1
+    wd.on_command("b", 2.0)
+    wd.estop()
+    wd.estop()
+    assert len(trips) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -373,3 +414,107 @@ def test_relay_state_reports_what_the_relay_does():
     assert relay_state(True, h) == "handover"
     h.state = HandoverState.DONE
     assert relay_state(False, h) == "handed_over"
+
+
+@sdk
+def test_relay_remote_estop_damps_the_active_client(monkeypatch):
+    from lerobot.robots.unitree_g1 import run_g1_server
+
+    msg = MagicMock()
+    msg.wireless_remote = bytes(40)
+    sub = MagicMock()
+    sub.Read.side_effect = lambda: (time.sleep(0.002), msg)[1]
+    wd = LowCmdWatchdog(timeout_s=10.0)
+    wd.on_command("a", time.monotonic())
+    stop = threading.Event()
+    monkeypatch.setattr(run_g1_server, "lowstate_to_dict", MagicMock(return_value={}))
+    thread = threading.Thread(
+        target=run_g1_server.state_forward_loop,
+        args=(sub, MagicMock(), 0.002, stop, None, wd, remote_key_mask("L2+B")),
+        daemon=True,
+    )
+    thread.start()
+    try:
+        time.sleep(0.05)
+        msg.wireless_remote = bytes([0, 0, 0x20, 0x00]) + bytes(36)  # L2 alone does nothing
+        time.sleep(0.05)
+        assert wd.forwarding
+        msg.wireless_remote = bytes([0, 0, 0x20, 0x02]) + bytes(36)
+        time.sleep(0.05)
+        assert not wd.forwarding
+        assert wd.on_command("a", time.monotonic()) is False
+    finally:
+        stop.set()
+        thread.join(timeout=2.0)
+
+
+@sdk
+def test_real_client_faults_when_the_relay_damps_after_forwarding():
+    with _real_robot() as (robot, mocks, written):
+        robot.connect(calibrate=False)
+        robot.send_action({"kLeftElbow.q": 0.2})
+        time.sleep(0.05)
+        assert robot._fault is None  # still "damping" before the relay forwarded: no fault
+        mocks["lowstate_msg"].relay_state = "forwarding"
+        time.sleep(0.1)
+        assert robot._fault is None
+        mocks["lowstate_msg"].relay_state = "damping"
+        time.sleep(0.1)
+        assert "remote e-stop" in robot._fault
+        assert _all_damping(written[-1])
+        with pytest.raises(RuntimeError, match="damping"):
+            robot.send_action({"kLeftElbow.q": 0.3})
+
+
+@sdk
+def test_real_disconnect_turns_head_torque_off():
+    with _real_robot() as (robot, _, written):
+        robot.connect(calibrate=False)
+        robot.headhand = MagicMock()
+        robot.disconnect()
+        robot.headhand.set_torque.assert_called_once_with(False)
+        assert _all_damping(written[-1])
+
+
+@sdk
+def test_headhand_process_serves_releases_and_stops(monkeypatch):
+    from lerobot.robots.unitree_g1 import run_g1_server
+
+    device = MagicMock(fault=None)
+    device.read_ticks.return_value = {"kHeadYaw": 2282}
+    monkeypatch.setattr(run_g1_server, "HeadHandDevice", MagicMock(return_value=device))
+    monkeypatch.setattr(run_g1_server.signal, "signal", MagicMock())
+    shutdown, release, ready = threading.Event(), threading.Event(), threading.Event()
+    server_kwargs = {"state_port": 0, "cmd_port": 0, "rate_hz": 100.0}
+    thread = threading.Thread(
+        target=run_g1_server.headhand_process,
+        args=({"head_port": "/dev/head", "hand_port": None}, False, server_kwargs, shutdown, release, ready),
+        daemon=True,
+    )
+    thread.start()
+    try:
+        assert ready.wait(2.0)
+        device.configure.assert_called_once()
+        release.set()
+        deadline = time.monotonic() + 2.0
+        while device.set_torque.call_args != ((False,), {}) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert device.set_torque.call_args == ((False,), {})
+    finally:
+        shutdown.set()
+        thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    device.disconnect.assert_called_once()
+
+
+@sdk
+def test_start_headhand_process_raises_when_the_child_fails():
+    from lerobot.robots.unitree_g1 import run_g1_server
+
+    with pytest.raises(RuntimeError, match="did not start"):
+        run_g1_server.start_headhand_process(
+            {"head_port": "/dev/does-not-exist", "hand_port": None},
+            False,
+            {"state_port": 0, "cmd_port": 0},
+            15.0,
+        )

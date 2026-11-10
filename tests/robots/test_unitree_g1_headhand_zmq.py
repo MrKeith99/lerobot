@@ -221,3 +221,28 @@ def test_headhand_server_reports_a_head_fault_in_the_state():
         t.join(timeout=2.0)
         client.disconnect()
         server.stop()
+
+
+def test_headhand_server_release_turns_torque_off_until_a_client_turns_it_on():
+    device = MagicMock(name="Device")
+    device.read_ticks.return_value = {"kHeadYaw": 2282}
+    device.fault = None
+    server = gz.HeadHandServer(device, state_port=0, cmd_port=0, rate_hz=100.0)
+    state_port, cmd_port = server.bind()
+    shutdown = threading.Event()
+    t = threading.Thread(target=server.run, args=(shutdown,), daemon=True)
+    t.start()
+    client = gz.HeadHandZmqClient("127.0.0.1", state_port=state_port, cmd_port=cmd_port)
+    client.connect()
+    try:
+        assert _wait_until(lambda: (client.read_latest() or {}).get("torque") is True)
+        server.release()
+        assert _wait_until(lambda: (client.read_latest() or {}).get("torque") is False)
+        device.set_torque.assert_called_with(False)
+        client.send(torque=True)
+        assert _wait_until(lambda: (client.read_latest() or {}).get("torque") is True)
+    finally:
+        shutdown.set()
+        t.join(timeout=2.0)
+        client.disconnect()
+        server.stop()

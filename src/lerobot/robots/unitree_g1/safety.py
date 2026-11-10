@@ -23,6 +23,8 @@ sent zero torque.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from typing import Any
 
 NUM_BODY_MOTORS = 29
@@ -40,6 +42,45 @@ DAMPING_KD: tuple[float, ...] = (
 # Relay: damping once no lowcmd arrived for this long; client: damping once lowstate is this old.
 LOWCMD_TIMEOUT_S = 0.3
 LOWSTATE_TIMEOUT_S = 0.2
+
+# Unitree remote buttons: bits of the little-endian uint16 at bytes 2-3 of `wireless_remote` (checked on the
+# robot 2026-11-10: L2 = bit 5, B = bit 9).
+REMOTE_KEY_BITS: dict[str, int] = {
+    "R1": 0,
+    "L1": 1,
+    "start": 2,
+    "select": 3,
+    "R2": 4,
+    "L2": 5,
+    "F1": 6,
+    "F2": 7,
+    "A": 8,
+    "B": 9,
+    "X": 10,
+    "Y": 11,
+    "up": 12,
+    "right": 13,
+    "down": 14,
+    "left": 15,
+}
+# The relay's remote e-stop: holding these keys latches damping, like a watchdog trip.
+ESTOP_KEYS = "L2+B"
+
+
+def remote_key_mask(combo: str) -> int:
+    """Bit mask of a `+`-joined key combo such as "L2+B"; 0 for an empty combo (e-stop off)."""
+    mask = 0
+    for name in filter(None, (part.strip() for part in combo.split("+"))):
+        if name not in REMOTE_KEY_BITS:
+            raise ValueError(f"unknown remote key {name!r}; known: {', '.join(REMOTE_KEY_BITS)}")
+        mask |= 1 << REMOTE_KEY_BITS[name]
+    return mask
+
+
+def remote_keys(wireless_remote: bytes | list[int]) -> int:
+    """The pressed-key bits of a lowstate `wireless_remote` (0 if it is too short)."""
+    raw = bytes(wireless_remote)
+    return int.from_bytes(raw[2:4], "little") if len(raw) >= 4 else 0
 
 
 def damping_motor_cmds(kd: tuple[float, ...] | list[float] = DAMPING_KD) -> list[dict[str, Any]]:
@@ -66,25 +107,51 @@ class LowCmdWatchdog:
         self.forwarding = False
         self._tripped: set[str | None] = set()
         self._last_cmd_t: float | None = None
+        self._lock = threading.Lock()  # the lowstate thread calls estop() while the cmd thread forwards
+        self.on_trip: Callable[[], None] | None = (
+            None  # called once per trip (timeout or e-stop), e.g. head off
+        )
 
     def on_command(self, session: str | None, now: float) -> bool:
         """A lowcmd from `session` arrived at `now`; True if it may be forwarded to the robot."""
-        if session in self._tripped:
-            return False
-        if self.forwarding and session != self.session:
-            return False  # a second client while one is active
-        self.session = session
-        self.forwarding = True
-        self._last_cmd_t = now
-        return True
+        with self._lock:
+            if session in self._tripped:
+                return False
+            if self.forwarding and session != self.session:
+                return False  # a second client while one is active
+            self.session = session
+            self.forwarding = True
+            self._last_cmd_t = now
+            return True
 
     def check(self, now: float) -> bool:
         """True when the robot must be held in damping now; trips the active session on a timeout."""
-        if self.forwarding and self._last_cmd_t is not None and now - self._last_cmd_t > self.timeout_s:
+        with self._lock:
+            tripped = (
+                self.forwarding and self._last_cmd_t is not None and now - self._last_cmd_t > self.timeout_s
+            )
+            if tripped:
+                self.forwarding = False
+                self._tripped.add(self.session)
+            damping = not self.forwarding
+        if tripped:
+            self._notify_trip()
+        return damping
+
+    def estop(self) -> str | None:
+        """Latch damping for the active session (remote e-stop); returns it if it was forwarding."""
+        with self._lock:
+            if not self.forwarding:
+                return None
             self.forwarding = False
             self._tripped.add(self.session)
-            return True
-        return not self.forwarding
+            session = self.session
+        self._notify_trip()
+        return session
+
+    def _notify_trip(self) -> None:
+        if self.on_trip is not None:
+            self.on_trip()
 
     def stale_s(self, now: float) -> float | None:
         return None if self._last_cmd_t is None else now - self._last_cmd_t
