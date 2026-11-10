@@ -58,12 +58,17 @@ TICKS_PER_TURN = 4096
 HEAD_OPERATING_MODE = 5
 HEAD_GOAL_CURRENT = 75  # starts both joints from standstill (40 did not); 2026-11-10 sweeps
 # Hard stops minus 30 ticks, measured 2026-11-10 (yaw 1704..2861; pitch -553..678 worst case over yaw, 0 = front).
-HEAD_BOX_TICKS: dict[str, tuple[int, int]] = {"kHeadYaw": (1734, 2831), "kHeadPitch": (-523, 648)}
+# Front (yaw 2544, pitch 224) +- the box; the mount slipped +262 / +224 ticks after 2026-11-10 morning: re-run
+# jetson_relay/tests/head_range_find.py --calibrate if the stops move (front yaw = midpoint of the yaw stops).
+HEAD_BOX_TICKS: dict[str, tuple[int, int]] = {"kHeadYaw": (1996, 3093), "kHeadPitch": (-299, 872)}
 # Within this many ticks outside the box (pitch rests on its down stop at ~700) a joint still gets torque.
-HEAD_BOX_TOLERANCE = 150
+HEAD_BOX_TOLERANCE = 250  # covers the head resting on its down stop with torque off (pitch ~813, 2026-11-10)
 
 DEFAULT_HEAD_PORT = "/dev/ttyCH341USB0"
 DEFAULT_HAND_PORT = "/dev/ttyACM0"
+SCS_BLOCK_ADDR = (
+    56  # SCS0009 Present_Position (56-57), Speed (58-59), Load (60-61), Voltage (62), Temperature (63)
+)
 
 # Every motor behind the head/hand bridge, by name: (ID, model).
 HEAD_HAND_MOTORS: dict[str, tuple[int, str]] = {**HEAD_MOTORS, **HAND_MOTORS}
@@ -141,6 +146,7 @@ class HeadHandDevice:
         temp_every: int = 25,
         head_box: Mapping[str, tuple[int, int]] | None = None,
         head_goal_current: int = HEAD_GOAL_CURRENT,
+        hand_block_read: bool = True,
     ) -> None:
         if head_port is None and hand_port is None:
             raise ValueError("HeadHandDevice needs a head port, a hand port or both")
@@ -166,6 +172,8 @@ class HeadHandDevice:
         self._lock = threading.Lock()
         self.hand_force = hand_force if self.hand_bus is not None else None
         self.temp_every = max(1, temp_every)
+        # One 8-byte read per hand servo (position, load, temperature) instead of a read per register.
+        self.hand_block_read = hand_block_read
         self._read_cycles = 0
         self._last_write_t: float | None = None
         self._hand_present: dict[str, int] = {}
@@ -301,7 +309,26 @@ class HeadHandDevice:
                     ticks.update(self._read_hand_feedback(with_temp))
             return ticks
 
+    def _read_hand_block(self, name: str) -> tuple[int, int, int]:
+        """`(position, signed load per mille, temperature C)` of one SCS servo from registers 56-63 in one read."""
+        bus = self.hand_bus
+        motor_id = bus.motors[name].id
+        for _ in range(2):  # one retry, like the named reads
+            data, comm, _error = bus.packet_handler.readTxRx(bus.port_handler, motor_id, SCS_BLOCK_ADDR, 8)
+            if comm == 0 and len(data) == 8:
+                break
+        else:
+            raise ConnectionError(f"{name}: block read failed ({bus.packet_handler.getTxRxResult(comm)})")
+        # SCS (protocol 1) words are big-endian; bytes 2-3 speed, 6 voltage are not used here.
+        return (data[0] << 8) | data[1], decode_scs_load((data[4] << 8) | data[5]), data[7]
+
     def _read_hand_feedback(self, with_temp: bool) -> dict[str, int]:
+        if self.hand_block_read:
+            for name in HAND_MOTORS:
+                self._hand_present[name], self._hand_load[name], self._hand_temp[name] = (
+                    self._read_hand_block(name)
+                )
+            return {name: self._hand_present[name] for name in HAND_MOTORS}
         for name in HAND_MOTORS:
             self._hand_present[name] = int(
                 self.hand_bus.read("Present_Position", name, normalize=False, num_retry=1)

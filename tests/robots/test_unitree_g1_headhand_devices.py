@@ -242,7 +242,7 @@ def _limited_device(head_bus_mock, hand_bus_mock, limiter=None, **kwargs):
         head_bus_cls=head_bus_cls,
         hand_bus_cls=hand_bus_cls,
         hand_force=limiter,
-        **kwargs,
+        **{"hand_block_read": False, **kwargs},
     )
 
 
@@ -454,3 +454,51 @@ def test_head_without_configure_keeps_the_old_behaviour(device, head_bus_mock):
     device.set_torque(True)
     head_bus_mock.enable_torque.assert_called_once_with()
     assert device.fault is None
+
+
+def _fake_block_reads(hand_bus_mock, pos=500, raw_load=0, temp=30):
+    hand_bus_mock.motors = d.build_hand_motors()
+    reply = [pos >> 8, pos & 0xFF, 0, 0, raw_load >> 8, raw_load & 0xFF, 60, temp]
+    hand_bus_mock.packet_handler.readTxRx.return_value = (reply, 0, 0)
+
+
+def test_block_read_decodes_big_endian_scs_registers(head_bus_mock, hand_bus_mock):
+    # Bytes as read on the robot 2026-11-10: position 463 = 0x01CF, load 0x0400 | 300 = -300 per mille.
+    dev = _limited_device(
+        head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), hand_block_read=True
+    )
+    _fake_block_reads(hand_bus_mock, pos=463, raw_load=0x0400 | 300, temp=24)
+    head_bus_mock.sync_read.return_value = dict.fromkeys(HEAD_MOTORS, 2048)
+    ticks = dev.read_ticks()
+    name = next(iter(HAND_MOTORS))
+    assert ticks[name] == 463
+    assert dev._hand_load[name] == -300
+    assert dev._hand_temp[name] == 24
+    assert hand_bus_mock.packet_handler.readTxRx.call_count == 16
+    assert hand_bus_mock.packet_handler.readTxRx.call_args.args[2:] == (d.SCS_BLOCK_ADDR, 8)
+    hand_bus_mock.read.assert_not_called()
+
+
+def test_block_read_retries_once_then_raises(head_bus_mock, hand_bus_mock):
+    dev = _limited_device(
+        head_bus_mock, hand_bus_mock, HandForceLimiter(max_err_ticks=30, load_limit=500), hand_block_read=True
+    )
+    _fake_block_reads(hand_bus_mock)
+    good = hand_bus_mock.packet_handler.readTxRx.return_value
+    hand_bus_mock.packet_handler.readTxRx.side_effect = [([], -6, 0), good] + [good] * 15
+    dev.read_ticks()  # one failed reply is retried
+    hand_bus_mock.packet_handler.readTxRx.side_effect = None
+    hand_bus_mock.packet_handler.readTxRx.return_value = ([], -6, 0)
+    with pytest.raises(ConnectionError, match="block read failed"):
+        dev.read_ticks()
+
+
+def test_head_resting_on_its_down_stop_gets_torque(head_bus_mock, hand_bus_mock):
+    # Torque off on exit lets the head sink to pitch ~813 (2026-11-10), past the box's 648: still allowed.
+    dev = _limited_device(head_bus_mock, hand_bus_mock)
+    dev.head_limits = {"kHeadYaw": (1734, 2831), "kHeadPitch": (-523, 648)}
+    dev.head_turns = dict.fromkeys(dev.head_limits, 0)
+    head_bus_mock.sync_read.return_value = {"kHeadYaw": 2290, "kHeadPitch": 813}
+    dev.set_torque(True)
+    assert dev.head_faults == {}
+    head_bus_mock.enable_torque.assert_called_with(["kHeadYaw", "kHeadPitch"])
